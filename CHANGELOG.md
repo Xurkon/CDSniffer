@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fixed memory hit addresses so captures report the exact string address instead of the region base address
+- Unified CLI and GUI PID resolution through the shared core resolver
+- Clarified search result rows by making `snapshot_index` refer to the matched snapshot
+- Refreshed README tab list, roadmap, and dependency wording
 - Added capture search support to the CLI with file search, regex matching, case sensitivity, and result limits
 - Added folder-wide capture search support to the CLI
 - Added CLI search result export in JSON, CSV, and Markdown formats

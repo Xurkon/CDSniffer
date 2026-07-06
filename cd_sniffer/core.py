@@ -466,10 +466,10 @@ def flatten_search_results(result: dict[str, Any]) -> list[dict[str, Any]]:
             rows.append(
                 {
                     "file": file_path,
-                    "snapshot_index": file_result.get("snapshot_count"),
+                    "snapshot_index": match.get("snapshot_index"),
+                    "snapshot_count": file_result.get("snapshot_count"),
                     "match_path": match.get("path"),
                     "value": match.get("value"),
-                    "snapshot_index_match": match.get("snapshot_index"),
                     "payload_index": match.get("payload_index"),
                 }
             )
@@ -478,10 +478,10 @@ def flatten_search_results(result: dict[str, Any]) -> list[dict[str, Any]]:
             rows.append(
                 {
                     "file": result.get("path", ""),
-                    "snapshot_index": result.get("snapshot_count"),
+                    "snapshot_index": match.get("snapshot_index"),
+                    "snapshot_count": result.get("snapshot_count"),
                     "match_path": match.get("path"),
                     "value": match.get("value"),
-                    "snapshot_index_match": match.get("snapshot_index"),
                     "payload_index": match.get("payload_index"),
                 }
             )
@@ -494,7 +494,7 @@ def render_search_results_csv(result: dict[str, Any]) -> str:
 
     rows = flatten_search_results(result)
     buffer = StringIO()
-    fieldnames = ["file", "snapshot_index", "match_path", "value", "snapshot_index_match", "payload_index"]
+    fieldnames = ["file", "snapshot_index", "snapshot_count", "match_path", "value", "payload_index"]
     writer = csv.DictWriter(buffer, fieldnames=fieldnames)
     writer.writeheader()
     writer.writerows(rows)

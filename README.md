@@ -194,17 +194,19 @@ That produces much better evidence than trying to infer the exact hex value firs
 
 ## GUI Layout
 
-The GUI is split into three primary tabs:
+The GUI is split into these primary tabs:
 
 - `Capture` for target selection, verbosity, filters, export settings, and session control
 - `Real-Time` for the live top-hit table and the latest snapshot payload
+- `Search` for folder-wide capture search with a filterable results table
+- `Terminal` for CLI-style commands inside the app
 - `Logs` for the rolling session log
+- `Presets` for reusable capture settings
 
 The GUI uses the same backend as the CLI, so captures, manifests, comparisons, and export formats all stay consistent between both entry points.
 
 The GUI also includes:
 
-- A terminal tab for CLI-style commands inside the app
 - A dedicated settings dialog for the full configuration set
 - IPC handling so the CLI can start, stop, show, hide, and retarget the GUI
 - A read-only capture dashboard so the main tab stays clean
@@ -216,21 +218,19 @@ Suggested starting command:
 python -m cd_sniffer --mode hotkey --hotkey F8 --window-title "Crimson Desert" --captures 20 --summary top-hits --timestamp-output --output logs\cdsniffer.jsonl
 ```
 
-## Community-Friendly Ideas
+## Near-Term Roadmap
 
-Good options to add if we keep growing this into a public tool:
+Good next steps before opening this up more broadly:
 
-- `--watch-pattern` to alert when a specific mission family appears
-- `--note` for short operator notes stored in the session metadata
-- `--window-filter-regex` with regex support for easier multi-window setups
-- Folder-wide search over archived capture logs
-- Highlighted search matches in the raw live capture viewer
-- Search history and saved search presets
+- Add exact GUI smoke tests with the `PySide6` extra installed
+- Add a build/release script for `cdsniffer.exe` and `cdsniffer-gui.exe`
+- Add a random session token to the localhost GUI IPC channel
+- Split the large GUI module into smaller files once the interface settles
 
 ## Notes
 
 - This tool is Windows-only.
-- It relies on standard library APIs only.
+- CLI mode relies on standard library APIs only; GUI mode needs `PySide6`.
 - The scanner is intentionally conservative and only looks at readable committed regions.
 - If the process name lookup is unreliable, prefer `--window-title` or `--pid`.
 - The JSON schema for capture output lives in `schemas/cdsniffer-output.schema.json`.

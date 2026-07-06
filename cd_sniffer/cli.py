@@ -13,7 +13,6 @@ from .core import (
     build_manifest,
     capture_once,
     close_handle,
-    find_pid_by_name,
     finalize_payload,
     list_windows,
     log_message,
@@ -26,6 +25,7 @@ from .core import (
     render_search_results_markdown,
     search_capture_file,
     search_capture_directory,
+    resolve_pid,
     timestamped_output_path,
     validate_regex_patterns,
     vk_from_name,
@@ -34,7 +34,7 @@ from .core import (
     write_snapshot,
 )
 from .ipc import send_gui_command
-from .windows import find_pids_by_window_title, is_key_down
+from .windows import is_key_down
 
 
 def parse_args() -> argparse.Namespace:
@@ -97,23 +97,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--search-format", choices=["json", "csv", "markdown"], default="json", help="Format used for search results")
     parser.add_argument("--search-output", help="Optional file path to write search results instead of printing them")
     return parser.parse_args()
-
-
-def resolve_pid(args: argparse.Namespace) -> int | None:
-    if args.pid:
-        return args.pid
-
-    if args.window_titles:
-        for title in args.window_titles:
-            pids = find_pids_by_window_title(title)
-            if pids:
-                return pids[0]
-
-    pid = find_pid_by_name(args.process)
-    if pid:
-        return pid
-
-    return None
 
 
 def main() -> int:

@@ -1056,7 +1056,7 @@ class MainWindow(QMainWindow):
         self.folder_search_results_table.setRowCount(len(rows))
         for row_index, row in enumerate(rows):
             self.folder_search_results_table.setItem(row_index, 0, QTableWidgetItem(str(row.get("file", ""))))
-            self.folder_search_results_table.setItem(row_index, 1, QTableWidgetItem(str(row.get("snapshot_index_match", row.get("snapshot_index", "")))))
+            self.folder_search_results_table.setItem(row_index, 1, QTableWidgetItem(str(row.get("snapshot_index", ""))))
             self.folder_search_results_table.setItem(row_index, 2, QTableWidgetItem(str(row.get("match_path", ""))))
             self.folder_search_results_table.setItem(row_index, 3, QTableWidgetItem(str(row.get("value", ""))))
             self.folder_search_results_table.setItem(row_index, 4, QTableWidgetItem(str(row.get("payload_index", ""))))

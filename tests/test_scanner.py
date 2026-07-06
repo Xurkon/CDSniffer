@@ -22,9 +22,13 @@ class ScannerTests(unittest.TestCase):
     def test_extract_strings_finds_ascii_and_utf16le(self):
         blob = b"xxxxMission_DeepForestBeacon_Surroundyyyy" + "Quest_Node_Her_DeepForestBeacon_Normal".encode("utf-16le")
         strings = extract_strings(blob)
-        texts = [text for _, text in strings]
+        texts = [text for _, _, text in strings]
         self.assertTrue(any("Mission_DeepForestBeacon_Surround" in text for text in texts))
         self.assertTrue(any("Quest_Node_Her_DeepForestBeacon_Normal" in text for text in texts))
+        ascii_hit = next(item for item in strings if item[1] == "ascii")
+        utf16_hit = next(item for item in strings if item[1] == "utf16le")
+        self.assertEqual(ascii_hit[0], 0)
+        self.assertGreater(utf16_hit[0], ascii_hit[0])
 
     def test_filter_hits_matches_keywords(self):
         strings = [
@@ -196,7 +200,7 @@ class ScannerTests(unittest.TestCase):
         }
         csv_text = render_search_results_csv(result)
         md_text = render_search_results_markdown(result)
-        self.assertIn("file,snapshot_index,match_path,value", csv_text)
+        self.assertIn("file,snapshot_index,snapshot_count,match_path,value", csv_text)
         self.assertIn("capture.jsonl", csv_text)
         self.assertIn("# CDSniffer Search Results", md_text)
         self.assertIn("Mission_One", md_text)

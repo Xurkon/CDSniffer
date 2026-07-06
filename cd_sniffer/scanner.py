@@ -25,13 +25,13 @@ class RegionScan:
     hits: tuple[MemoryHit, ...]
 
 
-def extract_strings(blob: bytes) -> list[tuple[str, str]]:
-    hits: list[tuple[str, str]] = []
+def extract_strings(blob: bytes) -> list[tuple[int, str, str]]:
+    hits: list[tuple[int, str, str]] = []
     for match in ASCII_RE.finditer(blob):
-        hits.append(("ascii", match.group(0).decode("ascii", "ignore")))
+        hits.append((match.start(), "ascii", match.group(0).decode("ascii", "ignore")))
     for match in UTF16_RE.finditer(blob):
         raw = match.group(0)
-        hits.append(("utf16le", raw.decode("utf-16le", "ignore")))
+        hits.append((match.start(), "utf16le", raw.decode("utf-16le", "ignore")))
     return hits
 
 
@@ -49,7 +49,7 @@ def _matches_any_pattern(text: str, patterns: list[re.Pattern[str]]) -> bool:
 
 
 def filter_hits(
-    strings: list[tuple[str, str]],
+    strings: list[tuple[str, str]] | list[tuple[int, str, str]],
     include_keywords: list[str],
     exclude_keywords: list[str] | None = None,
     include_patterns: list[str] | None = None,
@@ -61,7 +61,12 @@ def filter_hits(
     compiled_excludes = _compile_patterns(exclude_patterns)
     filtered: list[MemoryHit] = []
     seen: set[tuple[str, str]] = set()
-    for encoding, text in strings:
+    for item in strings:
+        if len(item) == 3:
+            offset, encoding, text = item
+        else:
+            offset = 0
+            encoding, text = item
         normalized = text.strip()
         if not normalized:
             continue
@@ -83,7 +88,7 @@ def filter_hits(
         if key in seen:
             continue
         seen.add(key)
-        filtered.append(MemoryHit(address=0, encoding=encoding, text=normalized))
+        filtered.append(MemoryHit(address=int(offset), encoding=encoding, text=normalized))
     return filtered
 
 
@@ -111,7 +116,7 @@ def scan_process(
         if not blob:
             continue
         hits: list[MemoryHit] = []
-        for encoding, text in extract_strings(blob):
+        for offset, encoding, text in extract_strings(blob):
             if exclude_keywords and _contains_any(text, exclude_keywords):
                 continue
             if compiled_excludes and _matches_any_pattern(text, compiled_excludes):
@@ -124,7 +129,7 @@ def scan_process(
             if not include_keywords and not compiled_includes:
                 include_match = True
             if include_match:
-                hits.append(MemoryHit(address=base, encoding=encoding, text=text))
+                hits.append(MemoryHit(address=base + offset, encoding=encoding, text=text))
             if max_hits_per_region is not None and len(hits) >= max_hits_per_region:
                 break
         if hits:
