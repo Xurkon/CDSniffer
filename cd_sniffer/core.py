@@ -22,6 +22,18 @@ from .windows import (
     vk_from_name,
 )
 
+CAMP_MISSION_GATE_KEYWORDS = [
+    "Mission Dispatch",
+    "Required Members",
+    "Comrades Selected",
+    "Task Time",
+    "Required Currency",
+    "Total Reward",
+]
+
+CAPTURE_GATE_MODES = ("off", "camp-mission", "custom")
+CAPTURE_GATE_MATCH_MODES = ("any", "all")
+
 
 def find_pid_by_name(process_name: str) -> int | None:
     try:
@@ -629,6 +641,167 @@ def collect_watch_hits(payload: dict[str, Any], patterns: list[str] | None) -> l
     return matches
 
 
+def _arg_list(args: argparse.Namespace, name: str) -> list[str]:
+    values = getattr(args, name, None) or []
+    return [str(value).strip() for value in values if str(value).strip()]
+
+
+def _positive_int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def build_capture_gate_filters(args: argparse.Namespace) -> tuple[list[str], list[str]]:
+    mode = str(getattr(args, "capture_gate", "off") or "off")
+    custom_keywords = _arg_list(args, "gate_keywords")
+    custom_patterns = _arg_list(args, "gate_patterns")
+    if mode == "off":
+        return [], []
+    if mode == "camp-mission":
+        return [*CAMP_MISSION_GATE_KEYWORDS, *custom_keywords], custom_patterns
+    if mode == "custom":
+        return custom_keywords, custom_patterns
+    raise ValueError(f"Unknown capture gate mode: {mode}")
+
+
+def _gate_match_all(texts: list[str], keywords: list[str], patterns: list[str]) -> bool:
+    lowered_texts = [text.lower() for text in texts]
+    keywords_match = all(
+        any(keyword.lower() in text for text in lowered_texts)
+        for keyword in keywords
+    )
+    compiled_patterns = [re.compile(pattern, re.IGNORECASE) for pattern in patterns]
+    patterns_match = all(any(pattern.search(text) for text in texts) for pattern in compiled_patterns)
+    return keywords_match and patterns_match
+
+
+def capture_gate_matches(handle: int, args: argparse.Namespace) -> tuple[bool, dict[str, Any]]:
+    mode = str(getattr(args, "capture_gate", "off") or "off")
+    detail: dict[str, Any] = {
+        "mode": mode,
+        "matched": True,
+        "match_mode": str(getattr(args, "capture_gate_match", "any") or "any"),
+        "hit_count": 0,
+        "matched_texts": [],
+    }
+    if mode == "off":
+        return True, detail
+
+    keywords, patterns = build_capture_gate_filters(args)
+    detail["keywords"] = keywords
+    detail["patterns"] = patterns
+    if not keywords and not patterns:
+        detail["matched"] = False
+        detail["reason"] = "capture gate has no keywords or regex patterns"
+        return False, detail
+
+    gate_payload = scan_to_json(
+        handle,
+        include_keywords=keywords,
+        exclude_keywords=[],
+        include_patterns=patterns,
+        exclude_patterns=None,
+        max_region_size=getattr(args, "max_region_size", 16 * 1024 * 1024),
+        max_regions=_positive_int_or_none(getattr(args, "gate_max_regions", 6)),
+        max_hits_per_region=_positive_int_or_none(getattr(args, "gate_max_hits_per_region", 1)),
+    )
+    texts = [
+        str(hit.get("text", ""))
+        for region in gate_payload.get("regions", [])
+        for hit in region.get("hits", [])
+        if str(hit.get("text", "")).strip()
+    ]
+    match_mode = str(getattr(args, "capture_gate_match", "any") or "any")
+    if match_mode == "all":
+        matched = _gate_match_all(texts, keywords, patterns)
+    else:
+        matched = bool(texts)
+
+    detail.update(
+        {
+            "matched": matched,
+            "match_mode": match_mode,
+            "hit_count": int(gate_payload.get("hit_count", len(texts)) or 0),
+            "matched_texts": texts[:20],
+            "region_count": gate_payload.get("region_count", 0),
+            "max_regions": _positive_int_or_none(getattr(args, "gate_max_regions", 6)),
+            "max_hits_per_region": _positive_int_or_none(getattr(args, "gate_max_hits_per_region", 1)),
+        }
+    )
+    return matched, detail
+
+
+def rebuild_payload_summary(payload: dict[str, Any], top_limit: int = 10) -> dict[str, Any]:
+    counts: dict[tuple[str, str], int] = {}
+    first_addresses: dict[tuple[str, str], int] = {}
+    unique_texts: set[str] = set()
+    hit_count = 0
+    for region in payload.get("regions", []):
+        for hit in region.get("hits", []):
+            text = str(hit.get("text", ""))
+            encoding = str(hit.get("encoding", ""))
+            address = int(hit.get("address", 0) or 0)
+            key = (encoding, text)
+            counts[key] = counts.get(key, 0) + 1
+            first_addresses.setdefault(key, address)
+            unique_texts.add(text)
+            hit_count += 1
+
+    top_hits = [
+        {
+            "count": count,
+            "encoding": encoding,
+            "first_address": first_addresses[(encoding, text)],
+            "text": text,
+        }
+        for (encoding, text), count in sorted(counts.items(), key=lambda item: (-item[1], item[0][1].lower()))[:top_limit]
+    ]
+    payload["region_count"] = len(payload.get("regions", []))
+    payload["hit_count"] = hit_count
+    payload["unique_hit_count"] = len(unique_texts)
+    payload["top_hits"] = top_hits
+    return payload
+
+
+def filter_payload_unique_hits(payload: dict[str, Any], seen_texts: set[str]) -> dict[str, Any]:
+    previous_seen_count = len(seen_texts)
+    original_hit_count = sum(len(region.get("hits", [])) for region in payload.get("regions", []))
+    unique_regions: list[dict[str, Any]] = []
+
+    for region in payload.get("regions", []):
+        unique_hits: list[dict[str, Any]] = []
+        for hit in region.get("hits", []):
+            text = str(hit.get("text", "")).strip()
+            if not text or text in seen_texts:
+                continue
+            seen_texts.add(text)
+            unique_hits.append(dict(hit))
+        if unique_hits:
+            region_copy = dict(region)
+            region_copy["hits"] = unique_hits
+            unique_regions.append(region_copy)
+
+    filtered_payload = dict(payload)
+    filtered_payload["regions"] = unique_regions
+    rebuild_payload_summary(filtered_payload)
+    filtered_payload["unique_filter"] = {
+        "enabled": True,
+        "scope": "session",
+        "key": "text",
+        "previous_seen_count": previous_seen_count,
+        "seen_text_count": len(seen_texts),
+        "original_hit_count": original_hit_count,
+        "new_hit_count": filtered_payload["hit_count"],
+        "skipped_hit_count": max(0, original_hit_count - filtered_payload["hit_count"]),
+    }
+    return filtered_payload
+
+
 def finalize_payload(
     payload: dict[str, Any],
     args: argparse.Namespace,
@@ -680,6 +853,13 @@ def capture_once(handle: int, pid: int, args: argparse.Namespace, include_keywor
         "max_region_size": args.max_region_size,
         "max_regions": args.max_regions,
         "max_hits_per_region": args.max_hits_per_region,
+        "capture_gate": getattr(args, "capture_gate", "off"),
+        "capture_gate_match": getattr(args, "capture_gate_match", "any"),
+        "gate_keywords": getattr(args, "gate_keywords", None),
+        "gate_patterns": getattr(args, "gate_patterns", None),
+        "gate_max_regions": getattr(args, "gate_max_regions", 6),
+        "gate_max_hits_per_region": getattr(args, "gate_max_hits_per_region", 1),
+        "unique_only": getattr(args, "unique_only", False),
     }
     if args.notes:
         payload["notes"] = args.notes

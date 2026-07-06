@@ -8,11 +8,15 @@ import time
 from typing import Any
 
 from .core import (
+    CAPTURE_GATE_MATCH_MODES,
+    CAPTURE_GATE_MODES,
     build_comparison,
     build_keywords,
     build_manifest,
+    capture_gate_matches,
     capture_once,
     close_handle,
+    filter_payload_unique_hits,
     finalize_payload,
     list_windows,
     log_message,
@@ -71,6 +75,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-region-size", type=int, default=16 * 1024 * 1024, help="Skip regions larger than this many bytes")
     parser.add_argument("--max-regions", type=int, help="Stop after scanning this many matching regions")
     parser.add_argument("--max-hits-per-region", type=int, help="Stop after this many hits in a single region")
+    parser.add_argument(
+        "--capture-gate",
+        choices=CAPTURE_GATE_MODES,
+        default="off",
+        help="Only capture when a memory sentinel is present; camp-mission waits for camp dispatch UI strings",
+    )
+    parser.add_argument(
+        "--capture-gate-match",
+        choices=CAPTURE_GATE_MATCH_MODES,
+        default="any",
+        help="Gate matching strategy for the selected capture gate",
+    )
+    parser.add_argument("--gate-keyword", action="append", dest="gate_keywords", help="Extra keyword used by the capture gate")
+    parser.add_argument("--gate-regex", action="append", dest="gate_patterns", help="Regex used by the capture gate")
+    parser.add_argument("--gate-max-regions", type=int, default=6, help="Maximum matching memory regions to inspect for the capture gate")
+    parser.add_argument("--gate-max-hits-per-region", type=int, default=1, help="Maximum gate hits to read from each matching region")
+    parser.add_argument("--unique-only", action="store_true", help="Only write new unique hit text values during this session")
     parser.add_argument("--summary", choices=["none", "top-hits"], default="none", help="Print a live capture summary")
     parser.add_argument("--summary-limit", type=int, default=10, help="How many top hits to show in summary mode")
     parser.add_argument("--compare-last", action="store_true", help="Show the diff from the previous capture")
@@ -97,6 +118,57 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--search-format", choices=["json", "csv", "markdown"], default="json", help="Format used for search results")
     parser.add_argument("--search-output", help="Optional file path to write search results instead of printing them")
     return parser.parse_args()
+
+
+def prepare_capture_payload(
+    handle: int,
+    pid: int,
+    args: argparse.Namespace,
+    include_keywords: list[str],
+    exclude_keywords: list[str],
+    output_path: Path,
+    previous_payload: dict[str, Any] | None,
+    seen_texts: set[str],
+) -> tuple[dict[str, Any] | None, str | None]:
+    gate_matched, gate_detail = capture_gate_matches(handle, args)
+    if not gate_matched:
+        reason = gate_detail.get("reason") or "target UI sentinel was not found"
+        return None, f"Capture gate not matched; {reason}."
+
+    payload = capture_once(handle, pid, args, include_keywords, exclude_keywords)
+    if gate_detail.get("mode") != "off":
+        payload["capture_gate"] = gate_detail
+
+    if args.unique_only:
+        payload = filter_payload_unique_hits(payload, seen_texts)
+        if payload.get("hit_count", 0) <= 0:
+            return None, "No new unique hits; snapshot skipped."
+
+    return finalize_payload(payload, args, output_path, previous_payload), None
+
+
+def write_and_report_payload(args: argparse.Namespace, output_path: Path, payload: dict[str, Any]) -> None:
+    if args.format in {"csv", "markdown"}:
+        write_rendered_snapshot(output_path, payload, args.format)
+    else:
+        write_snapshot(output_path, payload, args.format)
+    print_summary(args, payload, args.summary, args.summary_limit)
+    if payload.get("watch_hits"):
+        log_message(args, f"Watch hit: {', '.join(payload['watch_hits'])}")
+    if args.compare_last and "comparison" in payload:
+        comparison = payload["comparison"]
+        log_message(
+            args,
+            f"Compare-last: +{comparison['added_count']} / -{comparison['removed_count']}",
+            verbose_only=True,
+        )
+        if args.verbose:
+            added = ", ".join(comparison["added"])
+            removed = ", ".join(comparison["removed"])
+            if added:
+                log_message(args, f"  Added: {added}", verbose_only=True)
+            if removed:
+                log_message(args, f"  Removed: {removed}", verbose_only=True)
 
 
 def main() -> int:
@@ -181,6 +253,7 @@ def main() -> int:
         validate_regex_patterns(args.exclude_patterns, "--exclude-regex")
         validate_regex_patterns(args.window_filter_patterns, "--window-filter-regex")
         validate_regex_patterns(args.watch_patterns, "--watch-pattern")
+        validate_regex_patterns(args.gate_patterns, "--gate-regex")
     except ValueError as exc:
         print(str(exc))
         return 1
@@ -216,45 +289,43 @@ def main() -> int:
     try:
         include_keywords, exclude_keywords = build_keywords(args)
         previous_payload: dict[str, Any] | None = None
+        seen_texts: set[str] = set()
         if args.mode == "once":
-            payload = capture_once(handle, pid, args, include_keywords, exclude_keywords)
-            payload = finalize_payload(payload, args, output_path, previous_payload)
-            if args.format in {"csv", "markdown"}:
-                write_rendered_snapshot(output_path, payload, args.format)
-            else:
-                write_snapshot(output_path, payload, args.format)
-            print_summary(args, payload, args.summary, args.summary_limit)
-            if payload.get("watch_hits"):
-                log_message(args, f"Watch hit: {', '.join(payload['watch_hits'])}")
+            payload, skip_message = prepare_capture_payload(
+                handle,
+                pid,
+                args,
+                include_keywords,
+                exclude_keywords,
+                output_path,
+                previous_payload,
+                seen_texts,
+            )
+            if payload is None:
+                log_message(args, skip_message or "Capture skipped.")
+                return 0
+            write_and_report_payload(args, output_path, payload)
             log_message(args, "Capture complete.")
             return 0
 
         if args.mode == "loop":
             captures = 0
             while True:
-                payload = capture_once(handle, pid, args, include_keywords, exclude_keywords)
-                payload = finalize_payload(payload, args, output_path, previous_payload)
-                if args.format in {"csv", "markdown"}:
-                    write_rendered_snapshot(output_path, payload, args.format)
-                else:
-                    write_snapshot(output_path, payload, args.format)
-                print_summary(args, payload, args.summary, args.summary_limit)
-                if payload.get("watch_hits"):
-                    log_message(args, f"Watch hit: {', '.join(payload['watch_hits'])}")
-                if args.compare_last and "comparison" in payload:
-                    comparison = payload["comparison"]
-                    log_message(
-                        args,
-                        f"Compare-last: +{comparison['added_count']} / -{comparison['removed_count']}",
-                        verbose_only=True,
-                    )
-                    if args.verbose:
-                        added = ", ".join(comparison["added"])
-                        removed = ", ".join(comparison["removed"])
-                        if added:
-                            log_message(args, f"  Added: {added}", verbose_only=True)
-                        if removed:
-                            log_message(args, f"  Removed: {removed}", verbose_only=True)
+                payload, skip_message = prepare_capture_payload(
+                    handle,
+                    pid,
+                    args,
+                    include_keywords,
+                    exclude_keywords,
+                    output_path,
+                    previous_payload,
+                    seen_texts,
+                )
+                if payload is None:
+                    log_message(args, skip_message or "Capture skipped.", verbose_only=True)
+                    time.sleep(args.interval)
+                    continue
+                write_and_report_payload(args, output_path, payload)
                 previous_payload = payload
                 captures += 1
                 if args.captures is not None and captures >= args.captures:
@@ -267,29 +338,22 @@ def main() -> int:
         while True:
             current_state = is_key_down(hotkey_vk)
             if current_state and not last_hotkey_state:
-                payload = capture_once(handle, pid, args, include_keywords, exclude_keywords)
-                payload = finalize_payload(payload, args, output_path, previous_payload)
-                if args.format in {"csv", "markdown"}:
-                    write_rendered_snapshot(output_path, payload, args.format)
-                else:
-                    write_snapshot(output_path, payload, args.format)
-                print_summary(args, payload, args.summary, args.summary_limit)
-                if payload.get("watch_hits"):
-                    log_message(args, f"Watch hit: {', '.join(payload['watch_hits'])}")
-                if args.compare_last and "comparison" in payload:
-                    comparison = payload["comparison"]
-                    log_message(
-                        args,
-                        f"Compare-last: +{comparison['added_count']} / -{comparison['removed_count']}",
-                        verbose_only=True,
-                    )
-                    if args.verbose:
-                        added = ", ".join(comparison["added"])
-                        removed = ", ".join(comparison["removed"])
-                        if added:
-                            log_message(args, f"  Added: {added}", verbose_only=True)
-                        if removed:
-                            log_message(args, f"  Removed: {removed}", verbose_only=True)
+                payload, skip_message = prepare_capture_payload(
+                    handle,
+                    pid,
+                    args,
+                    include_keywords,
+                    exclude_keywords,
+                    output_path,
+                    previous_payload,
+                    seen_texts,
+                )
+                if payload is None:
+                    log_message(args, skip_message or "Capture skipped.")
+                    last_hotkey_state = current_state
+                    time.sleep(max(0.05, min(args.interval, 0.25)))
+                    continue
+                write_and_report_payload(args, output_path, payload)
                 previous_payload = payload
                 log_message(args, "Captured snapshot.")
                 captures += 1

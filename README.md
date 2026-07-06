@@ -24,6 +24,8 @@ For compiled releases, the clean target is two executables:
 - Can locate the target by window title fragment when the process name is ambiguous
 - Scans readable memory regions for ASCII and UTF-16LE strings
 - Filters hits by mission-related keywords and optional regex patterns
+- Can gate captures until camp mission UI sentinel strings are present in memory
+- Can write only new unique hit text values during a capture session
 - Searches captured payloads from the CLI and the GUI
 - Lets the GUI live view search the current real-time capture without changing the underlying snapshot
 - Lets the GUI keep a searchable recent-history list and named saved searches
@@ -110,6 +112,12 @@ python -m cd_sniffer --mode loop --interval 1.0 --captures 10
 python -m cd_sniffer --mode hotkey --hotkey F8 --captures 5
 ```
 
+Recommended camp mission capture:
+
+```powershell
+python -m cd_sniffer --mode loop --window-title "Crimson Desert" --capture-gate camp-mission --unique-only --summary top-hits --timestamp-output --output logs\camp-mission.jsonl
+```
+
 Timestamped session logs:
 
 ```powershell
@@ -125,6 +133,11 @@ Useful filters and safety limits:
 - `--max-region-size` skips very large memory regions
 - `--max-regions` stops after a fixed number of matching regions
 - `--max-hits-per-region` keeps huge pages from flooding the log
+- `--capture-gate camp-mission` only captures when camp/dispatch UI sentinel strings are found
+- `--capture-gate custom` uses only your `--gate-keyword` and `--gate-regex` sentinels
+- `--capture-gate-match any|all` controls whether one or every gate sentinel must match
+- `--gate-max-regions` and `--gate-max-hits-per-region` keep the gate pre-scan cheap
+- `--unique-only` skips repeated hit text values already captured during the same session
 - `--summary top-hits` prints the most frequent strings after each capture
 - `--pick-window` prompts you to choose a target window if auto-detection misses
 - `--timestamp-output` creates a fresh log file per session
@@ -175,12 +188,14 @@ Search the live GUI capture:
 The most reliable way to get the exact data you want is:
 
 1. Open only the one game screen you care about, such as a camp dispatch screen or a specific mission detail panel.
-2. Capture twice: once before the action you care about and once after the action appears.
-3. Use `--summary top-hits` so you can see the dominant strings immediately after each capture.
-4. Keep the capture window small with `--captures 1` or a short hotkey session so the log only contains the relevant state.
-5. Use `--include-regex` to focus on families you already know, and `--exclude-regex` to filter noisy quest or story strings.
-6. Compare the resulting strings against unpacked tables and keep only the entries that consistently show up in the correct camp UI.
-7. If a string appears in multiple game systems, prefer the one that is unique to the camp/dispatch screen over one that also appears in player quests.
+2. Use `--capture-gate camp-mission` so looped captures wait for camp mission UI labels instead of logging unrelated gameplay state.
+3. Add `--unique-only` when looping so repeated strings are not written again and again.
+4. Capture twice: once before the action you care about and once after the action appears.
+5. Use `--summary top-hits` so you can see the dominant strings immediately after each capture.
+6. Keep the capture window small with `--captures 1` or a short hotkey session so the log only contains the relevant state.
+7. Use `--include-regex` to focus on families you already know, and `--exclude-regex` to filter noisy quest or story strings.
+8. Compare the resulting strings against unpacked tables and keep only the entries that consistently show up in the correct camp UI.
+9. If a string appears in multiple game systems, prefer the one that is unique to the camp/dispatch screen over one that also appears in player quests.
 
 In practice, that means the best workflow is to:
 
@@ -232,6 +247,8 @@ Good next steps before opening this up more broadly:
 - This tool is Windows-only.
 - CLI mode relies on standard library APIs only; GUI mode needs `PySide6`.
 - The scanner is intentionally conservative and only looks at readable committed regions.
+- Capture gates are memory-sentinel checks, not computer-vision screen cropping.
+- If the camp gate misses a UI state, use `--capture-gate custom` with `--gate-keyword` or `--gate-regex` from a known visible label.
 - If the process name lookup is unreliable, prefer `--window-title` or `--pid`.
 - The JSON schema for capture output lives in `schemas/cdsniffer-output.schema.json`.
 - The detailed project history lives in `CHANGELOG.md`.

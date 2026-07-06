@@ -1,12 +1,17 @@
+import argparse
 from pathlib import Path
 import sys
 import unittest
 import tempfile
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from cd_sniffer.cli import build_comparison, load_signature_pack, timestamped_output_path
 from cd_sniffer.core import (
+    build_capture_gate_filters,
+    capture_gate_matches,
+    filter_payload_unique_hits,
     render_search_results_csv,
     render_search_results_markdown,
     search_capture_directory,
@@ -129,6 +134,72 @@ class ScannerTests(unittest.TestCase):
         comparison = build_comparison(current, previous, limit=10)
         self.assertEqual(comparison["added"], ["A"])
         self.assertEqual(comparison["removed"], ["C"])
+
+    def test_capture_gate_filters_use_camp_sentinels_plus_custom_terms(self):
+        args = argparse.Namespace(
+            capture_gate="camp-mission",
+            gate_keywords=["Camp Mission Detail"],
+            gate_patterns=[r"Required\s+Members"],
+        )
+        keywords, patterns = build_capture_gate_filters(args)
+        self.assertIn("Required Members", keywords)
+        self.assertIn("Comrades Selected", keywords)
+        self.assertIn("Camp Mission Detail", keywords)
+        self.assertEqual(patterns, [r"Required\s+Members"])
+
+    def test_capture_gate_matches_any_sentinel_from_scan_payload(self):
+        args = argparse.Namespace(
+            capture_gate="custom",
+            capture_gate_match="any",
+            gate_keywords=["Required Members"],
+            gate_patterns=[],
+            max_region_size=1024,
+            gate_max_regions=2,
+            gate_max_hits_per_region=1,
+        )
+        gate_payload = {
+            "hit_count": 1,
+            "region_count": 1,
+            "regions": [{"hits": [{"text": "Required Members"}]}],
+        }
+        with patch("cd_sniffer.core.scan_to_json", return_value=gate_payload):
+            matched, detail = capture_gate_matches(1234, args)
+        self.assertTrue(matched)
+        self.assertEqual(detail["mode"], "custom")
+        self.assertEqual(detail["matched_texts"], ["Required Members"])
+
+    def test_capture_gate_custom_mode_requires_filters(self):
+        args = argparse.Namespace(capture_gate="custom", capture_gate_match="any", gate_keywords=[], gate_patterns=[])
+        matched, detail = capture_gate_matches(1234, args)
+        self.assertFalse(matched)
+        self.assertIn("no keywords", detail["reason"])
+
+    def test_filter_payload_unique_hits_keeps_only_new_session_text(self):
+        payload = {
+            "regions": [
+                {
+                    "base_address": 0x1000,
+                    "region_size": 0x2000,
+                    "hits": [
+                        {"address": 0x1010, "encoding": "ascii", "text": "Mission_A"},
+                        {"address": 0x1020, "encoding": "utf16le", "text": "Mission_A"},
+                        {"address": 0x1030, "encoding": "ascii", "text": "Mission_B"},
+                    ],
+                }
+            ],
+            "hit_count": 3,
+            "unique_hit_count": 2,
+            "top_hits": [],
+        }
+        seen = {"Mission_B"}
+        filtered = filter_payload_unique_hits(payload, seen)
+        self.assertEqual(filtered["hit_count"], 1)
+        self.assertEqual(filtered["unique_hit_count"], 1)
+        self.assertEqual(filtered["regions"][0]["hits"][0]["text"], "Mission_A")
+        self.assertEqual(filtered["top_hits"][0]["text"], "Mission_A")
+        self.assertEqual(filtered["unique_filter"]["original_hit_count"], 3)
+        self.assertEqual(filtered["unique_filter"]["skipped_hit_count"], 2)
+        self.assertEqual(seen, {"Mission_A", "Mission_B"})
 
     def test_search_helpers_match_payload_fields(self):
         payload = {

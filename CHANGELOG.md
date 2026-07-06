@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added capture gates so CLI and GUI sessions can wait for camp mission UI sentinel strings before writing snapshots
+- Added custom gate keywords/regex, any/all gate matching, and separate gate scan limits
+- Added `--unique-only` plus GUI setting support to skip repeated hit text values during a session
 - Fixed memory hit addresses so captures report the exact string address instead of the region base address
 - Unified CLI and GUI PID resolution through the shared core resolver
 - Clarified search result rows by making `snapshot_index` refer to the matched snapshot

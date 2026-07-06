@@ -105,11 +105,15 @@ else:
     _GUI_IMPORT_ERROR = None
 
 from .core import (
+    CAPTURE_GATE_MATCH_MODES,
+    CAPTURE_GATE_MODES,
     build_keywords,
     build_comparison,
     build_manifest,
+    capture_gate_matches,
     capture_once,
     collect_matching_windows,
+    filter_payload_unique_hits,
     finalize_payload,
     load_signature_pack,
     merge_signature_packs,
@@ -324,6 +328,14 @@ class SettingsDialog(QDialog):
         self.format.setCurrentText(str(self._settings.get("format", "jsonl")))
         self.label = QLineEdit(str(self._settings.get("label", "capture")))
         self.game_version = QLineEdit(str(self._settings.get("game_version", "")))
+        self.capture_gate = QComboBox()
+        self.capture_gate.addItems(list(CAPTURE_GATE_MODES))
+        self.capture_gate.setCurrentText(str(self._settings.get("capture_gate", "off")))
+        self.capture_gate_match = QComboBox()
+        self.capture_gate_match.addItems(list(CAPTURE_GATE_MATCH_MODES))
+        self.capture_gate_match.setCurrentText(str(self._settings.get("capture_gate_match", "any")))
+        self.unique_only = QCheckBox("Only capture new unique hit text")
+        self.unique_only.setChecked(bool(self._settings.get("unique_only", False)))
         form.addRow("Mode", self.mode)
         form.addRow("Hotkey", self.hotkey)
         form.addRow("Interval", self.interval)
@@ -334,6 +346,9 @@ class SettingsDialog(QDialog):
         form.addRow("Format", self.format)
         form.addRow("Label", self.label)
         form.addRow("Game Version", self.game_version)
+        form.addRow("Capture Gate", self.capture_gate)
+        form.addRow("Gate Match", self.capture_gate_match)
+        form.addRow("", self.unique_only)
 
     def build_filters_tab(self) -> None:
         form = QFormLayout(self.filters_tab)
@@ -343,6 +358,8 @@ class SettingsDialog(QDialog):
         self.exclude_patterns = QPlainTextEdit(join_values(self._settings.get("exclude_patterns")))
         self.signature_packs = QPlainTextEdit(join_values(self._settings.get("signature_packs")))
         self.watch_patterns = QPlainTextEdit(join_values(self._settings.get("watch_patterns")))
+        self.gate_keywords = QPlainTextEdit(join_values(self._settings.get("gate_keywords")))
+        self.gate_patterns = QPlainTextEdit(join_values(self._settings.get("gate_patterns")))
         self.notes = QPlainTextEdit(join_values(self._settings.get("notes")))
         form.addRow("Include Keywords", self.include_keywords)
         form.addRow("Exclude Keywords", self.exclude_keywords)
@@ -350,6 +367,8 @@ class SettingsDialog(QDialog):
         form.addRow("Exclude Regex", self.exclude_patterns)
         form.addRow("Signature Packs", self.signature_packs)
         form.addRow("Watch Patterns", self.watch_patterns)
+        form.addRow("Gate Keywords", self.gate_keywords)
+        form.addRow("Gate Regex", self.gate_patterns)
         form.addRow("Notes", self.notes)
 
     def build_advanced_tab(self) -> None:
@@ -369,6 +388,14 @@ class SettingsDialog(QDialog):
         self.max_hits_per_region.setSpecialValueText("Unlimited")
         max_hits_value = self._settings.get("max_hits_per_region")
         self.max_hits_per_region.setValue(int(max_hits_value) if max_hits_value else 0)
+        self.gate_max_regions = QSpinBox()
+        self.gate_max_regions.setRange(0, 1_000_000)
+        self.gate_max_regions.setSpecialValueText("Unlimited")
+        self.gate_max_regions.setValue(int(self._settings.get("gate_max_regions", 6) or 0))
+        self.gate_max_hits_per_region = QSpinBox()
+        self.gate_max_hits_per_region.setRange(0, 1_000_000)
+        self.gate_max_hits_per_region.setSpecialValueText("Unlimited")
+        self.gate_max_hits_per_region.setValue(int(self._settings.get("gate_max_hits_per_region", 1) or 0))
         self.summary = QComboBox()
         self.summary.addItems(["none", "top-hits"])
         self.summary.setCurrentText(str(self._settings.get("summary", "none")))
@@ -391,6 +418,8 @@ class SettingsDialog(QDialog):
         form.addRow("Max Region Size", self.max_region_size)
         form.addRow("Max Regions", self.max_regions)
         form.addRow("Max Hits/Region", self.max_hits_per_region)
+        form.addRow("Gate Max Regions", self.gate_max_regions)
+        form.addRow("Gate Max Hits/Region", self.gate_max_hits_per_region)
         form.addRow("Summary", self.summary)
         form.addRow("Summary Limit", self.summary_limit)
         form.addRow("", self.compare_last)
@@ -454,17 +483,24 @@ class SettingsDialog(QDialog):
             "format": self.format.currentText(),
             "label": self.label.text().strip() or "capture",
             "game_version": self.game_version.text().strip(),
+            "capture_gate": self.capture_gate.currentText(),
+            "capture_gate_match": self.capture_gate_match.currentText(),
+            "unique_only": self.unique_only.isChecked(),
             "include_keywords": split_values(self.include_keywords.toPlainText()),
             "exclude_keywords": split_values(self.exclude_keywords.toPlainText()),
             "include_patterns": split_values(self.include_patterns.toPlainText()),
             "exclude_patterns": split_values(self.exclude_patterns.toPlainText()),
             "signature_packs": split_values(self.signature_packs.toPlainText()),
             "watch_patterns": split_values(self.watch_patterns.toPlainText()),
+            "gate_keywords": split_values(self.gate_keywords.toPlainText()),
+            "gate_patterns": split_values(self.gate_patterns.toPlainText()),
             "notes": split_values(self.notes.toPlainText()),
             "window_filter_patterns": split_values(self.window_filter_patterns.toPlainText()),
             "max_region_size": int(self.max_region_size.value()),
             "max_regions": self.max_regions.value() or None,
             "max_hits_per_region": self.max_hits_per_region.value() or None,
+            "gate_max_regions": self.gate_max_regions.value() or None,
+            "gate_max_hits_per_region": self.gate_max_hits_per_region.value() or None,
             "summary": self.summary.currentText(),
             "summary_limit": int(self.summary_limit.value()),
             "compare_last": self.compare_last.isChecked(),
@@ -594,6 +630,37 @@ class CaptureWorker(QObject):
             return reopened_handle, pid
         return None, None
 
+    def _capture_payload(
+        self,
+        handle: int,
+        pid: int,
+        args: argparse.Namespace,
+        include_keywords: list[str],
+        exclude_keywords: list[str],
+        output_path: Path,
+        previous_payload: dict[str, Any] | None,
+        seen_texts: set[str],
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        gate_matched, gate_detail = capture_gate_matches(handle, args)
+        if not gate_matched:
+            reason = gate_detail.get("reason") or "target UI sentinel was not found"
+            return None, f"Capture gate not matched; {reason}."
+
+        payload = capture_once(handle, pid, args, include_keywords, exclude_keywords)
+        if gate_detail.get("mode") != "off":
+            payload["capture_gate"] = gate_detail
+        if getattr(args, "unique_only", False):
+            payload = filter_payload_unique_hits(payload, seen_texts)
+            if payload.get("hit_count", 0) <= 0:
+                return None, "No new unique hits; snapshot skipped."
+        return finalize_payload(payload, args, output_path, previous_payload), None
+
+    def _write_payload(self, args: argparse.Namespace, output_path: Path, payload: dict[str, Any]) -> None:
+        if args.format in {"csv", "markdown"}:
+            write_rendered_snapshot(output_path, payload, args.format)
+        else:
+            write_snapshot(output_path, payload, args.format)
+
     @Slot()
     def run(self) -> None:
         handle: int | None = None
@@ -604,6 +671,7 @@ class CaptureWorker(QObject):
             validate_regex_patterns(args.exclude_patterns, "--exclude-regex or signature pack exclude_patterns")
             validate_regex_patterns(args.window_filter_patterns, "--window-filter-regex")
             validate_regex_patterns(args.watch_patterns, "--watch-pattern")
+            validate_regex_patterns(args.gate_patterns, "--gate-regex")
             include_keywords, exclude_keywords = build_keywords(args)
             handle, pid = self._open_target(args)
             if not handle or not pid:
@@ -616,6 +684,7 @@ class CaptureWorker(QObject):
                 self.status.emit(f"Wrote manifest: {manifest_path}")
             hotkey_vk = vk_from_name(args.hotkey)
             previous_payload: dict[str, Any] | None = None
+            seen_texts: set[str] = set()
             captures = 0
             if args.mode == "once":
                 handle, pid = self._ensure_target_handle(args, handle, pid)
@@ -624,13 +693,21 @@ class CaptureWorker(QObject):
                     return
                 args.pid = pid
                 started = time.perf_counter()
-                payload = capture_once(handle, pid, args, include_keywords, exclude_keywords)
-                payload = finalize_payload(payload, args, output_path, previous_payload)
+                payload, skip_message = self._capture_payload(
+                    handle,
+                    pid,
+                    args,
+                    include_keywords,
+                    exclude_keywords,
+                    output_path,
+                    previous_payload,
+                    seen_texts,
+                )
+                if payload is None:
+                    self.status.emit(skip_message or "Capture skipped.")
+                    return
                 payload["capture_duration_ms"] = round((time.perf_counter() - started) * 1000.0, 2)
-                if args.format in {"csv", "markdown"}:
-                    write_rendered_snapshot(output_path, payload, args.format)
-                else:
-                    write_snapshot(output_path, payload, args.format)
+                self._write_payload(args, output_path, payload)
                 self.captured.emit(payload)
                 self.status.emit("Capture complete.")
                 return
@@ -645,13 +722,23 @@ class CaptureWorker(QObject):
                         continue
                     args.pid = pid
                     started = time.perf_counter()
-                    payload = capture_once(handle, pid, args, include_keywords, exclude_keywords)
-                    payload = finalize_payload(payload, args, output_path, previous_payload)
+                    payload, skip_message = self._capture_payload(
+                        handle,
+                        pid,
+                        args,
+                        include_keywords,
+                        exclude_keywords,
+                        output_path,
+                        previous_payload,
+                        seen_texts,
+                    )
+                    if payload is None:
+                        self.status.emit(skip_message or "Capture skipped.")
+                        if self._stop_event.wait(max(0.01, args.interval)):
+                            break
+                        continue
                     payload["capture_duration_ms"] = round((time.perf_counter() - started) * 1000.0, 2)
-                    if args.format in {"csv", "markdown"}:
-                        write_rendered_snapshot(output_path, payload, args.format)
-                    else:
-                        write_snapshot(output_path, payload, args.format)
+                    self._write_payload(args, output_path, payload)
                     self.captured.emit(payload)
                     self.status.emit(f"Captured {captures + 1} snapshot(s)")
                     previous_payload = payload
@@ -675,13 +762,24 @@ class CaptureWorker(QObject):
                     current_state = is_key_down(hotkey_vk)
                     if current_state and not last_state:
                         started = time.perf_counter()
-                        payload = capture_once(handle, pid, args, include_keywords, exclude_keywords)
-                        payload = finalize_payload(payload, args, output_path, previous_payload)
+                        payload, skip_message = self._capture_payload(
+                            handle,
+                            pid,
+                            args,
+                            include_keywords,
+                            exclude_keywords,
+                            output_path,
+                            previous_payload,
+                            seen_texts,
+                        )
+                        if payload is None:
+                            self.status.emit(skip_message or "Capture skipped.")
+                            last_state = current_state
+                            if self._stop_event.wait(max(0.05, min(args.interval, 0.25))):
+                                break
+                            continue
                         payload["capture_duration_ms"] = round((time.perf_counter() - started) * 1000.0, 2)
-                        if args.format in {"csv", "markdown"}:
-                            write_rendered_snapshot(output_path, payload, args.format)
-                        else:
-                            write_snapshot(output_path, payload, args.format)
+                        self._write_payload(args, output_path, payload)
                         self.captured.emit(payload)
                         self.status.emit(f"Captured {captures + 1} snapshot(s)")
                         previous_payload = payload
@@ -850,6 +948,14 @@ class MainWindow(QMainWindow):
         self.format_combo.addItems(["jsonl", "json", "csv", "markdown"])
         self.label_edit = QLineEdit("capture")
         self.game_version_edit = QLineEdit()
+        self.capture_gate_combo = QComboBox()
+        self.capture_gate_combo.addItems(list(CAPTURE_GATE_MODES))
+        self.capture_gate_combo.setCurrentText("off")
+        self.capture_gate_match_combo = QComboBox()
+        self.capture_gate_match_combo.addItems(list(CAPTURE_GATE_MATCH_MODES))
+        self.capture_gate_match_combo.setCurrentText("any")
+        self.unique_only_check = QCheckBox("Only capture new unique hit text")
+        self.unique_only_check.setChecked(False)
         self.summary_combo = QComboBox()
         self.summary_combo.addItems(["none", "top-hits"])
         self.summary_limit_spin = QSpinBox()
@@ -901,8 +1007,20 @@ class MainWindow(QMainWindow):
         self.max_hits_per_region.setRange(0, 1_000_000)
         self.max_hits_per_region.setSpecialValueText("Unlimited")
         self.max_hits_per_region.setValue(0)
+        self.gate_max_regions_spin = QSpinBox()
+        self.gate_max_regions_spin.setRange(0, 1_000_000)
+        self.gate_max_regions_spin.setSpecialValueText("Unlimited")
+        self.gate_max_regions_spin.setValue(6)
+        self.gate_max_hits_per_region_spin = QSpinBox()
+        self.gate_max_hits_per_region_spin.setRange(0, 1_000_000)
+        self.gate_max_hits_per_region_spin.setSpecialValueText("Unlimited")
+        self.gate_max_hits_per_region_spin.setValue(1)
         self.watch_edit = QPlainTextEdit()
         self.watch_edit.setPlaceholderText("One regex per line for watch alerts")
+        self.gate_keywords_edit = QPlainTextEdit()
+        self.gate_keywords_edit.setPlaceholderText("Extra capture-gate keywords, one per line")
+        self.gate_regex_edit = QPlainTextEdit()
+        self.gate_regex_edit.setPlaceholderText("Capture-gate regex patterns, one per line")
         self.signature_pack_edit = QPlainTextEdit()
         self.signature_pack_edit.setPlaceholderText("One signature pack path per line")
         self.include_keywords_edit = QPlainTextEdit()
@@ -1404,6 +1522,8 @@ class MainWindow(QMainWindow):
                     f"Hotkey: {self.hotkey_edit.text().strip() or 'F8'}",
                     f"Output: {self.output_edit.text().strip() or 'logs/cdsniffer.jsonl'}",
                     f"Format: {self.format_combo.currentText()}",
+                    f"Capture gate: {self.capture_gate_combo.currentText()} / {self.capture_gate_match_combo.currentText()}",
+                    f"Unique only: {'yes' if self.unique_only_check.isChecked() else 'no'}",
                     f"Summary: {self.summary_combo.currentText()}",
                     f"Timestamp output: {'yes' if self.timestamp_check.isChecked() else 'no'}",
                     f"Manifest: {'yes' if self.export_manifest_check.isChecked() else 'no'}",
@@ -1876,16 +1996,25 @@ class MainWindow(QMainWindow):
             "format": self.format_combo.currentText(),
             "label": self.label_edit.text().strip() or "capture",
             "game_version": self.game_version_edit.text().strip(),
+            "capture_gate": self.capture_gate_combo.currentText(),
+            "capture_gate_match": self.capture_gate_match_combo.currentText(),
+            "unique_only": self.unique_only_check.isChecked(),
             "include_keywords": split_values(self.include_keywords_edit.toPlainText()),
             "exclude_keywords": split_values(self.exclude_keywords_edit.toPlainText()),
             "include_patterns": split_values(self.include_regex_edit.toPlainText()),
             "exclude_patterns": split_values(self.exclude_regex_edit.toPlainText()),
             "signature_packs": split_values(self.signature_pack_edit.toPlainText()),
             "watch_patterns": split_values(self.watch_edit.toPlainText()),
+            "gate_keywords": split_values(self.gate_keywords_edit.toPlainText()),
+            "gate_patterns": split_values(self.gate_regex_edit.toPlainText()),
             "notes": split_values(self.notes_edit.toPlainText()),
             "max_region_size": 16 * 1024 * 1024 if not hasattr(self, "max_region_size") else int(self.max_region_size.value()),
             "max_regions": None if not hasattr(self, "max_regions") else (self.max_regions.value() or None),
             "max_hits_per_region": None if not hasattr(self, "max_hits_per_region") else (self.max_hits_per_region.value() or None),
+            "gate_max_regions": None if not hasattr(self, "gate_max_regions_spin") else (self.gate_max_regions_spin.value() or None),
+            "gate_max_hits_per_region": None
+            if not hasattr(self, "gate_max_hits_per_region_spin")
+            else (self.gate_max_hits_per_region_spin.value() or None),
             "summary": self.summary_combo.currentText(),
             "summary_limit": self.summary_limit_spin.value(),
             "compare_last": self.compare_check.isChecked(),
@@ -1917,12 +2046,17 @@ class MainWindow(QMainWindow):
         self.format_combo.setCurrentText(str(settings.get("format", "jsonl")))
         self.label_edit.setText(str(settings.get("label", "capture")))
         self.game_version_edit.setText(str(settings.get("game_version", "")))
+        self.capture_gate_combo.setCurrentText(str(settings.get("capture_gate", "off")))
+        self.capture_gate_match_combo.setCurrentText(str(settings.get("capture_gate_match", "any")))
+        self.unique_only_check.setChecked(bool(settings.get("unique_only", False)))
         self.include_keywords_edit.setPlainText(join_values(settings.get("include_keywords")))
         self.exclude_keywords_edit.setPlainText(join_values(settings.get("exclude_keywords")))
         self.include_regex_edit.setPlainText(join_values(settings.get("include_patterns")))
         self.exclude_regex_edit.setPlainText(join_values(settings.get("exclude_patterns")))
         self.signature_pack_edit.setPlainText(join_values(settings.get("signature_packs")))
         self.watch_edit.setPlainText(join_values(settings.get("watch_patterns")))
+        self.gate_keywords_edit.setPlainText(join_values(settings.get("gate_keywords")))
+        self.gate_regex_edit.setPlainText(join_values(settings.get("gate_patterns")))
         self.notes_edit.setPlainText(join_values(settings.get("notes")))
         if hasattr(self, "max_region_size"):
             self.max_region_size.setValue(int(settings.get("max_region_size", 16 * 1024 * 1024)))
@@ -1930,6 +2064,12 @@ class MainWindow(QMainWindow):
             self.max_regions.setValue(int(settings["max_regions"]) if settings.get("max_regions") else 0)
         if hasattr(self, "max_hits_per_region"):
             self.max_hits_per_region.setValue(int(settings["max_hits_per_region"]) if settings.get("max_hits_per_region") else 0)
+        if hasattr(self, "gate_max_regions_spin"):
+            self.gate_max_regions_spin.setValue(int(settings["gate_max_regions"]) if settings.get("gate_max_regions") else 0)
+        if hasattr(self, "gate_max_hits_per_region_spin"):
+            self.gate_max_hits_per_region_spin.setValue(
+                int(settings["gate_max_hits_per_region"]) if settings.get("gate_max_hits_per_region") else 0
+            )
         self.summary_combo.setCurrentText(str(settings.get("summary", "none")))
         self.summary_limit_spin.setValue(int(settings.get("summary_limit", 10)))
         self.compare_check.setChecked(bool(settings.get("compare_last", False)))
@@ -1979,6 +2119,9 @@ class MainWindow(QMainWindow):
             "format": self.format_combo.currentText(),
             "label": self.label_edit.text().strip() or "capture",
             "game_version": self.game_version_edit.text().strip(),
+            "capture_gate": self.capture_gate_combo.currentText(),
+            "capture_gate_match": self.capture_gate_match_combo.currentText(),
+            "unique_only": self.unique_only_check.isChecked(),
             "include_keywords": split_values(self.include_keywords_edit.toPlainText()),
             "exclude_keywords": split_values(self.exclude_keywords_edit.toPlainText()),
             "include_patterns": split_values(self.include_regex_edit.toPlainText()),
@@ -1987,6 +2130,10 @@ class MainWindow(QMainWindow):
             "max_region_size": int(self.max_region_size.value()),
             "max_regions": self.max_regions.value() or None,
             "max_hits_per_region": self.max_hits_per_region.value() or None,
+            "gate_keywords": split_values(self.gate_keywords_edit.toPlainText()),
+            "gate_patterns": split_values(self.gate_regex_edit.toPlainText()),
+            "gate_max_regions": self.gate_max_regions_spin.value() or None,
+            "gate_max_hits_per_region": self.gate_max_hits_per_region_spin.value() or None,
             "summary": self.summary_combo.currentText(),
             "summary_limit": self.summary_limit_spin.value(),
             "compare_last": self.compare_check.isChecked(),
@@ -2069,6 +2216,7 @@ class MainWindow(QMainWindow):
             validate_regex_patterns(args.exclude_patterns, "--exclude-regex")
             validate_regex_patterns(args.window_filter_patterns, "--window-filter-regex")
             validate_regex_patterns(args.watch_patterns, "--watch-pattern")
+            validate_regex_patterns(args.gate_patterns, "--gate-regex")
             if args.signature_packs:
                 for pack in args.signature_packs:
                     if not Path(pack).exists():
