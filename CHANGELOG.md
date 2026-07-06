@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added built-in PAMT/PAZ archive listing and extraction commands so CDSniffer can unpack/decode game files without external unpacker executables
+- Added deterministic XML decryption, zlib decompression, optional LZ4 decompression, archive filtering, dry-run extraction, and archive JSON/CSV/Markdown reports
+- Added `schemas/cdsniffer-archive.schema.json` plus synthetic PAMT/PAZ tests for archive parsing and extraction
 - Added format-aware correlation hints for JSON/JSONL records, text offsets, PASEQ candidates, nearby printable strings, and little-endian integers
 - Added `file_format`, `format_hints`, `format_hint_summary`, and `format_hint_count` to correlation reports
 - Added `--correlate-no-format-hints` for faster raw-byte-only correlation scans

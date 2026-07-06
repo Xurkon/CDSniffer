@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/cdsniffer-archive.schema.json",
+  "title": "CDSniffer Archive Report",
+  "type": "object",
+  "required": ["schema_version", "created_at"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "roots": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "patterns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "total_entries": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "entry_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "compressed_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "encrypted_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "compression_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "output_dir": {
+      "type": "string"
+    },
+    "extracted_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "error_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "decrypted_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "decompressed_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "dry_run": {
+      "type": "boolean"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/archive_entry"
+          },
+          {
+            "$ref": "#/$defs/extracted_entry"
+          }
+        ]
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "error"],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "$defs": {
+    "archive_entry": {
+      "type": "object",
+      "required": ["path", "paz_file", "pamt_file", "offset", "comp_size", "orig_size", "compression_name"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "paz_file": {
+          "type": "string"
+        },
+        "pamt_file": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "offset_hex": {
+          "type": "string"
+        },
+        "comp_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "orig_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "flags": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "flags_hex": {
+          "type": "string"
+        },
+        "paz_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "compressed": {
+          "type": "boolean"
+        },
+        "compression_type": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "compression_name": {
+          "type": "string"
+        },
+        "encrypted": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "extracted_entry": {
+      "type": "object",
+      "required": ["entry", "output_path"],
+      "properties": {
+        "entry": {
+          "$ref": "#/$defs/archive_entry"
+        },
+        "output_path": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "decrypted": {
+          "type": "boolean"
+        },
+        "decompressed": {
+          "type": "boolean"
+        },
+        "file_format": {
+          "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

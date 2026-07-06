@@ -43,6 +43,14 @@ from .core import (
     write_snapshot,
 )
 from .ipc import send_gui_command
+from .paz_archive import (
+    build_archive_report,
+    extract_entries,
+    filter_archive_entries,
+    load_archive_entries,
+    render_archive_csv,
+    render_archive_markdown,
+)
 from .windows import is_key_down
 
 
@@ -140,6 +148,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--correlate-no-format-hints", action="store_false", dest="correlate_format_hints", default=True, help="Skip JSON/text/binary format hints during correlation")
     parser.add_argument("--correlate-format", choices=["json", "csv", "markdown"], default="json", help="Format used for correlation results")
     parser.add_argument("--correlate-output", help="Optional file path to write correlation results instead of printing them")
+    parser.add_argument("--archive-root", action="append", dest="archive_roots", help="Game/archive root or .pamt file to inspect; may be repeated")
+    parser.add_argument("--archive-paz-dir", help="Directory containing .paz files when --archive-root is a standalone .pamt")
+    parser.add_argument("--archive-list", action="store_true", help="List PAMT/PAZ entries using the built-in parser")
+    parser.add_argument("--archive-extract", action="store_true", help="Extract matching PAMT/PAZ entries using the built-in unpacker")
+    parser.add_argument("--archive-filter", action="append", dest="archive_filters", help="Archive entry glob or substring filter; may be repeated")
+    parser.add_argument("--archive-limit", type=int, help="Maximum archive entries to list or extract")
+    parser.add_argument("--archive-all", action="store_true", help="Allow extracting all matched entries when no filter or limit is supplied")
+    parser.add_argument("--archive-output", help="Output directory for --archive-extract")
+    parser.add_argument("--archive-report-output", help="Optional file path to write archive list/extract report")
+    parser.add_argument("--archive-format", choices=["json", "csv", "markdown"], default="json", help="Format used for archive reports")
+    parser.add_argument("--archive-no-decrypt", action="store_true", help="Do not decrypt XML entries during archive extraction")
+    parser.add_argument("--archive-dry-run", action="store_true", help="Show what would be extracted without writing files")
     return parser.parse_args()
 
 
@@ -222,6 +242,66 @@ def main() -> int:
 
     if args.list_windows:
         return list_windows(args)
+
+    if args.archive_list or args.archive_extract:
+        if not args.archive_roots:
+            print("--archive-root is required with --archive-list or --archive-extract")
+            return 1
+        if args.archive_limit is not None and args.archive_limit < 1:
+            print("--archive-limit must be at least 1")
+            return 1
+        archive_roots = [Path(item) for item in args.archive_roots]
+        paz_dir = Path(args.archive_paz_dir) if args.archive_paz_dir else None
+        for archive_root in archive_roots:
+            if not archive_root.exists():
+                print(f"Archive root not found: {archive_root}")
+                return 1
+        if paz_dir is not None and not paz_dir.exists():
+            print(f"Archive PAZ directory not found: {paz_dir}")
+            return 1
+        try:
+            if args.archive_extract:
+                if not args.archive_output:
+                    print("--archive-output is required with --archive-extract")
+                    return 1
+                if not args.archive_filters and args.archive_limit is None and not args.archive_all:
+                    print("--archive-extract without a filter or limit requires --archive-all")
+                    return 1
+                entries = load_archive_entries(archive_roots, paz_dir=paz_dir)
+                entries = filter_archive_entries(entries, patterns=args.archive_filters, limit=args.archive_limit)
+                result = extract_entries(
+                    entries,
+                    Path(args.archive_output),
+                    decrypt_xml=not args.archive_no_decrypt,
+                    dry_run=args.archive_dry_run,
+                )
+                result["roots"] = [str(root) for root in archive_roots]
+                result["patterns"] = args.archive_filters or ["*"]
+            else:
+                result = build_archive_report(
+                    archive_roots,
+                    paz_dir=paz_dir,
+                    patterns=args.archive_filters,
+                    limit=args.archive_limit,
+                )
+        except Exception as exc:
+            print(f"Archive operation failed: {exc}")
+            return 1
+
+        if args.archive_format == "csv":
+            rendered = render_archive_csv(result)
+        elif args.archive_format == "markdown":
+            rendered = render_archive_markdown(result)
+        else:
+            rendered = json.dumps(result, ensure_ascii=False, indent=2)
+        if args.archive_report_output:
+            out_path = Path(args.archive_report_output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(rendered, encoding="utf-8")
+            print(json.dumps({"written": str(out_path), "format": args.archive_format}, ensure_ascii=False, indent=2))
+        else:
+            print(rendered)
+        return 0
 
     target_capture_arg = args.correlate_target or args.correlate_capture
     if args.correlate_baseline and not target_capture_arg:

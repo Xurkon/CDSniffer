@@ -4,6 +4,8 @@ from pathlib import Path
 import sys
 import unittest
 import tempfile
+import struct
+import zlib
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -14,6 +16,15 @@ from cd_sniffer.correlator import (
     extract_evidence_from_capture,
     render_correlation_csv,
     render_correlation_markdown,
+)
+from cd_sniffer.paz_archive import (
+    build_archive_report,
+    extract_entry,
+    extract_entries,
+    filter_archive_entries,
+    hashlittle,
+    parse_pamt,
+    PazEntry,
 )
 from cd_sniffer.core import (
     build_capture_gate_filters,
@@ -445,6 +456,57 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("paseq-binary", hint_kinds)
         self.assertIn("little-endian-context", match["confidence_reasons"])
 
+    def test_paz_parser_reads_synthetic_pamt(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            pamt = write_synthetic_pamt(root, "data/test.bin", comp_size=11, orig_size=11, flags=0)
+            (root / "0.paz").write_bytes(b"hello world")
+
+            entries = parse_pamt(pamt)
+            report = build_archive_report([pamt])
+
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].path, "testpkg/data/test.bin")
+        self.assertEqual(entries[0].comp_size, 11)
+        self.assertEqual(report["entry_count"], 1)
+        self.assertEqual(report["entries"][0]["compression_name"], "none")
+
+    def test_paz_extracts_uncompressed_entry(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            pamt = write_synthetic_pamt(root, "data/test.bin", comp_size=11, orig_size=11, flags=0)
+            (root / "0.paz").write_bytes(b"hello world")
+            output = root / "out"
+
+            entry = parse_pamt(pamt)[0]
+            result = extract_entry(entry, output, decrypt_xml=False)
+
+            self.assertEqual(result["size"], 11)
+            self.assertFalse(result["decrypted"])
+            self.assertFalse(result["decompressed"])
+            self.assertEqual((output / "testpkg" / "data" / "test.bin").read_bytes(), b"hello world")
+
+    def test_paz_extracts_zlib_entry_and_filters(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            raw = b"Mission_A" * 20
+            compressed = zlib.compress(raw)
+            pamt = write_synthetic_pamt(root, "data/mission.bin", comp_size=len(compressed), orig_size=len(raw), flags=0x00040000)
+            (root / "0.paz").write_bytes(compressed)
+            output = root / "out"
+
+            entries = parse_pamt(pamt)
+            filtered = filter_archive_entries(entries, patterns=["*mission*"])
+            result = extract_entries(filtered, output, decrypt_xml=False)
+
+            self.assertEqual(len(filtered), 1)
+            self.assertEqual(result["extracted_count"], 1)
+            self.assertEqual(result["decompressed_count"], 1)
+            self.assertEqual((output / "testpkg" / "data" / "mission.bin").read_bytes(), raw)
+
+    def test_paz_hashlittle_uses_documented_vector(self):
+        self.assertEqual(hashlittle(b"rendererconfigurationmaterial.xml", 0x000C5EDE), 0xAF3DCEF3)
+
 
 def json_line(payload: dict) -> str:
     return json.dumps(payload, ensure_ascii=False) + "\n"
@@ -471,6 +533,44 @@ def capture_payload(texts: list[str]) -> dict:
             }
         ],
     }
+
+
+def write_synthetic_pamt(root: Path, node_path: str, *, comp_size: int, orig_size: int, flags: int) -> Path:
+    node_parts = node_path.split("/")
+    buffer = bytearray()
+    buffer += struct.pack("<I", 0x09F510ED)
+    buffer += struct.pack("<I", 1)
+    buffer += struct.pack("<II", 0, 0)
+    buffer += struct.pack("<II", 0, 4096)
+
+    folder = bytearray()
+    folder_name = b"testpkg"
+    folder += struct.pack("<I", 0xFFFFFFFF)
+    folder += struct.pack("B", len(folder_name)) + folder_name
+    buffer += struct.pack("<I", len(folder)) + folder
+
+    nodes = bytearray()
+    parent = 0xFFFFFFFF
+    last_ref = 0
+    for index, part in enumerate(node_parts):
+        if index < len(node_parts) - 1:
+            name = f"{part}/".encode("utf-8")
+        else:
+            name = part.encode("utf-8")
+        node_ref = len(nodes)
+        nodes += struct.pack("<I", parent)
+        nodes += struct.pack("B", len(name)) + name
+        parent = node_ref
+        last_ref = node_ref
+    buffer += struct.pack("<I", len(nodes)) + nodes
+
+    buffer += struct.pack("<II", 1, 0)
+    buffer += b"\x00" * 16
+    buffer += struct.pack("<IIIII", last_ref, 0, comp_size, orig_size, flags)
+
+    pamt = root / "0.pamt"
+    pamt.write_bytes(bytes(buffer))
+    return pamt
 
 
 if __name__ == "__main__":

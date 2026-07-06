@@ -31,6 +31,7 @@ For compiled releases, the clean target is two executables:
 - Groups duplicate evidence at the same file offset so one candidate carries its full evidence trail
 - Can compare baseline and target captures to highlight target-only file-offset candidates
 - Adds format-aware correlation hints for JSON/JSONL records, text line locations, PASEQ candidates, nearby strings, and little-endian integers
+- Can parse PAMT indexes and extract/decode PAZ archive entries without launching an external unpacker
 - Can gate captures until camp mission UI sentinel strings are present in memory
 - Can write only new unique hit text values during a capture session
 - Searches captured payloads from the CLI and the GUI
@@ -105,6 +106,12 @@ Install the GUI extra if needed:
 pip install .[gui]
 ```
 
+Install archive decode extras if you need encrypted XML or LZ4 entries:
+
+```powershell
+pip install .[unpack]
+```
+
 To find the right window first:
 
 ```powershell
@@ -170,6 +177,32 @@ python -m cd_sniffer --search "Mission_" --search-dir logs --search-recursive
 python -m cd_sniffer --search "Mission_" --search-dir logs --search-format csv --search-output logs\search-results.csv
 python -m cd_sniffer --search "Mission_" --search-dir logs --search-format markdown --search-output logs\search-results.md
 ```
+
+List game archive contents with the built-in PAMT parser:
+
+```powershell
+python -m cd_sniffer --archive-list --archive-root "C:\Program Files (x86)\Steam\steamapps\common\Crimson Desert" --archive-filter "*mission*" --archive-limit 200 --archive-format markdown --archive-report-output logs\archive-mission-index.md
+```
+
+Extract and decode matching PAZ entries:
+
+```powershell
+python -m cd_sniffer --archive-extract --archive-root "C:\Program Files (x86)\Steam\steamapps\common\Crimson Desert" --archive-filter "*.xml" --archive-filter "*mission*" --archive-output D:\Documents\CrimsonDesertMods\decoded --archive-format json --archive-report-output logs\archive-extract.json
+```
+
+Useful archive options:
+
+- `--archive-root` points to the game root, an archive folder, or a specific `.pamt` file and can be repeated
+- `--archive-paz-dir` points to the matching `.paz` directory when listing a standalone `.pamt`
+- `--archive-list` parses PAMT indexes and reports archive entries without extracting
+- `--archive-extract` extracts matching entries to `--archive-output`
+- `--archive-filter` filters by entry path glob or substring and can be repeated
+- `--archive-limit` caps list or extract operations
+- `--archive-all` is required when extracting everything without a filter or limit
+- `--archive-no-decrypt` extracts encrypted XML bytes without decrypting
+- `--archive-dry-run` previews extraction without writing decoded files
+- `--archive-format json|csv|markdown` controls report format
+- `--archive-report-output` writes the archive report to a file
 
 Correlate a capture against unpacked files:
 
@@ -249,11 +282,13 @@ The most reliable way to get the exact data you want is:
 6. Use `--summary top-hits` so you can see the dominant strings immediately after each capture.
 7. Keep the capture window small with `--captures 1` or a short hotkey session so the log only contains the relevant state.
 8. Use `--include-regex` to focus on families you already know, and `--exclude-regex` to filter noisy quest or story strings.
-9. Compare the resulting strings against unpacked tables and keep only the entries that consistently show up in the correct camp UI.
-10. Run `--correlate-baseline` plus `--correlate-target` against the unpacked file tree and inspect `target-only` rows first.
-11. Prefer rows with format hints that point to JSON record keys, mission-like tables, PASEQ candidates, or nearby little-endian values.
-12. Prefer module-relative `module_rva` over absolute `address` whenever it is available; absolute addresses can shift between launches.
-13. If a string appears in multiple game systems, prefer the one that is unique to the camp/dispatch screen over one that also appears in player quests.
+9. Use `--archive-list` to find likely mission/table entries inside the game PAZ/PAMT archives.
+10. Use `--archive-extract` to decode only the focused subset you need into a clean working folder.
+11. Compare the resulting strings against decoded `questgaugeinfo`, `questinfo`, and `missioninfo` style tables and keep only the entries that consistently show up in the correct camp UI.
+12. Run `--correlate-baseline` plus `--correlate-target` against the decoded file tree and inspect `target-only` rows first.
+13. Prefer rows with format hints that point to JSON record keys, mission-like tables, PASEQ candidates, or nearby little-endian values.
+14. Prefer module-relative `module_rva` over absolute `address` whenever it is available; absolute addresses can shift between launches.
+15. If a string appears in multiple game systems, prefer the one that is unique to the camp/dispatch screen over one that also appears in player quests.
 
 In practice, that means the best workflow is to:
 
@@ -298,6 +333,7 @@ Good next steps before opening this up more broadly:
 - Add exact GUI smoke tests with the `PySide6` extra installed
 - Add DMM-specific patch emitters on top of the generic correlation patch skeletons
 - Expand format analyzers with deeper PASEQ, quest/mission table, hash, and typed record parsers
+- Expand built-in PAZ support for custom compression type `3` once the format is confirmed
 - Add repeat-run confidence rollups across multiple target captures
 - Add a build/release script for `cdsniffer.exe` and `cdsniffer-gui.exe`
 - Add a random session token to the localhost GUI IPC channel
@@ -313,7 +349,9 @@ Good next steps before opening this up more broadly:
 - If the process name lookup is unreliable, prefer `--window-title` or `--pid`.
 - The JSON schema for capture output lives in `schemas/cdsniffer-output.schema.json`.
 - The JSON schema for correlation output lives in `schemas/cdsniffer-correlation.schema.json`.
+- The JSON schema for archive list/extract output lives in `schemas/cdsniffer-archive.schema.json`.
 - The detailed project history lives in `CHANGELOG.md`.
 - The GUI is optional and needs `pip install .[gui]`.
+- Encrypted XML and LZ4 archive decoding need `pip install .[unpack]`; PAMT listing and uncompressed/zlib extraction use the standard library.
 - The main GUI capture tab is intentionally a dashboard; all editable settings live in the settings dialog.
 - Live search only filters the current snapshot view; it does not mutate the underlying capture payload.
