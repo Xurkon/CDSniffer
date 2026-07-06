@@ -126,6 +126,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--search-format", choices=["json", "csv", "markdown"], default="json", help="Format used for search results")
     parser.add_argument("--search-output", help="Optional file path to write search results instead of printing them")
     parser.add_argument("--correlate-capture", help="Capture JSON/JSONL file to correlate against unpacked files")
+    parser.add_argument("--correlate-target", help="Target capture JSON/JSONL file for baseline-vs-target correlation")
+    parser.add_argument("--correlate-baseline", help="Optional baseline capture JSON/JSONL file for diff correlation")
     parser.add_argument("--correlate-root", help="Root directory of unpacked/game files to scan")
     parser.add_argument("--correlate-recursive", action="store_true", default=True, help="Recursively scan subfolders for correlation")
     parser.add_argument("--correlate-no-recursive", action="store_false", dest="correlate_recursive", help="Only scan the top level for correlation")
@@ -220,14 +222,23 @@ def main() -> int:
     if args.list_windows:
         return list_windows(args)
 
-    if args.correlate_capture:
+    target_capture_arg = args.correlate_target or args.correlate_capture
+    if args.correlate_baseline and not target_capture_arg:
+        print("--correlate-capture or --correlate-target is required with --correlate-baseline")
+        return 1
+
+    if target_capture_arg:
         if not args.correlate_root:
-            print("--correlate-root is required with --correlate-capture")
+            print("--correlate-root is required with --correlate-capture or --correlate-target")
             return 1
-        capture_path = Path(args.correlate_capture)
+        capture_path = Path(target_capture_arg)
+        baseline_capture_path = Path(args.correlate_baseline) if args.correlate_baseline else None
         root_path = Path(args.correlate_root)
         if not capture_path.exists():
             print(f"Capture file not found: {capture_path}")
+            return 1
+        if baseline_capture_path is not None and not baseline_capture_path.exists():
+            print(f"Baseline capture file not found: {baseline_capture_path}")
             return 1
         if not root_path.exists() or not root_path.is_dir():
             print(f"Correlation root directory not found: {root_path}")
@@ -248,6 +259,7 @@ def main() -> int:
             result = correlate_capture_to_files(
                 capture_path,
                 root_path,
+                baseline_capture_path=baseline_capture_path,
                 recursive=args.correlate_recursive,
                 patterns=args.correlate_globs,
                 max_file_size=args.correlate_max_file_size,

@@ -28,6 +28,8 @@ For compiled releases, the clean target is two executables:
 - Can capture byte context around each hit for nearby hex/ID analysis
 - Can decode nearby integer candidates from captured byte context
 - Can correlate captured strings, hit bytes, and numeric candidates back to unpacked file offsets
+- Groups duplicate evidence at the same file offset so one candidate carries its full evidence trail
+- Can compare baseline and target captures to highlight target-only file-offset candidates
 - Can gate captures until camp mission UI sentinel strings are present in memory
 - Can write only new unique hit text values during a capture session
 - Searches captured payloads from the CLI and the GUI
@@ -174,13 +176,23 @@ Correlate a capture against unpacked files:
 python -m cd_sniffer --correlate-capture logs\camp-mission.jsonl --correlate-root D:\Documents\CrimsonDesertMods\unpacked --correlate-glob *.json --correlate-glob *.paseq --correlate-format markdown --correlate-output logs\correlation.md
 ```
 
+Correlate a baseline/target pair against unpacked files:
+
+```powershell
+python -m cd_sniffer --correlate-baseline logs\before-camp-ui.jsonl --correlate-target logs\camp-ui-open.jsonl --correlate-root D:\Documents\CrimsonDesertMods\unpacked --correlate-glob *.json --correlate-glob *.paseq --correlate-format markdown --correlate-output logs\correlation-diff.md
+```
+
 Useful correlation options:
 
 - `--correlate-capture` points to a CDSniffer JSON or JSONL capture
+- `--correlate-target` is an explicit target-capture alias for diff workflows
+- `--correlate-baseline` compares a before-state capture against the target capture
 - `--correlate-root` points to the unpacked/game file tree to scan
 - `--correlate-glob` limits scanned files by glob and can be repeated
 - `--correlate-max-file-size` skips huge files
 - `--correlate-max-matches` limits total results
+- `--correlate-max-matches-per-evidence` limits repeated offsets for one evidence item
+- `--correlate-context-bytes` includes surrounding file bytes in JSON output
 - `--correlate-no-numeric` skips decoded numeric candidate bytes
 - `--correlate-format json|csv|markdown` controls the report format
 - `--correlate-output` writes the report to a file
@@ -189,6 +201,9 @@ Correlation results include:
 
 - Matching file path and file offset
 - Match type, such as text, hit bytes, or decoded numeric candidate bytes
+- Evidence count and evidence trail for grouped candidates
+- Confidence reasons such as exact hit bytes, text-and-bytes, nearby numeric evidence, or target-only
+- Diff status when a baseline is provided: `target-only` or `shared-with-baseline`
 - Original bytes at the file offset
 - Runtime address and module-relative RVA when available
 - Confidence score
@@ -203,6 +218,7 @@ Search the live GUI capture:
 - Use the embedded terminal with `search <query>` or `search-clear`
 - Use the embedded terminal with `search-export [path]` and `search-import [path]` to manage search presets
 - Use the embedded terminal with `correlate <capture> <root> [json|csv|markdown]` to run a compact file-offset report
+- Use the embedded terminal with `correlate-diff <baseline> <target> <root> [json|csv|markdown]` to compare before/after captures
 - Matching text is highlighted directly in the live raw snapshot view
 - Use the `Recent` dropdown to reuse previous searches
 - Use the saved-search controls to store and restore named search presets
@@ -230,7 +246,7 @@ The most reliable way to get the exact data you want is:
 7. Keep the capture window small with `--captures 1` or a short hotkey session so the log only contains the relevant state.
 8. Use `--include-regex` to focus on families you already know, and `--exclude-regex` to filter noisy quest or story strings.
 9. Compare the resulting strings against unpacked tables and keep only the entries that consistently show up in the correct camp UI.
-10. Run `--correlate-capture` against the unpacked file tree to find candidate file offsets and original bytes.
+10. Run `--correlate-baseline` plus `--correlate-target` against the unpacked file tree and inspect `target-only` rows first.
 11. Prefer module-relative `module_rva` over absolute `address` whenever it is available; absolute addresses can shift between launches.
 12. If a string appears in multiple game systems, prefer the one that is unique to the camp/dispatch screen over one that also appears in player quests.
 
@@ -277,7 +293,7 @@ Good next steps before opening this up more broadly:
 - Add exact GUI smoke tests with the `PySide6` extra installed
 - Add DMM-specific patch emitters on top of the generic correlation patch skeletons
 - Add known-format parsers for PASEQ, quest/mission tables, hashes, and little-endian structures
-- Add confidence scoring across baseline/target capture sessions
+- Add repeat-run confidence rollups across multiple target captures
 - Add a build/release script for `cdsniffer.exe` and `cdsniffer-gui.exe`
 - Add a random session token to the localhost GUI IPC channel
 - Split the large GUI module into smaller files once the interface settles

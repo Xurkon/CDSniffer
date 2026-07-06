@@ -16,6 +16,9 @@
     "capture_path": {
       "type": "string"
     },
+    "baseline_capture_path": {
+      "type": ["string", "null"]
+    },
     "root": {
       "type": "string"
     },
@@ -33,6 +36,26 @@
       "minimum": 0
     },
     "evidence_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "raw_match_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "baseline_evidence_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "baseline_match_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "target_only_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "shared_count": {
       "type": "integer",
       "minimum": 0
     },
@@ -107,6 +130,93 @@
             "type": "number",
             "minimum": 0,
             "maximum": 1
+          },
+          "diff_status": {
+            "type": "string",
+            "enum": ["uncompared", "target-only", "shared-with-baseline"]
+          },
+          "evidence_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "match_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidence_values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "hit_texts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "snapshots": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "confidence_reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidence_id": {
+                  "type": ["string", "null"]
+                },
+                "match_type": {
+                  "type": ["string", "null"]
+                },
+                "evidence_value": {
+                  "type": ["string", "null"]
+                },
+                "hit_text": {
+                  "type": ["string", "null"]
+                },
+                "snapshot_index": {
+                  "type": ["integer", "null"],
+                  "minimum": 1
+                },
+                "hit_index": {
+                  "type": ["integer", "null"],
+                  "minimum": 1
+                },
+                "runtime_address": {
+                  "type": ["integer", "null"],
+                  "minimum": 0
+                },
+                "runtime_address_hex": {
+                  "type": ["string", "null"]
+                },
+                "module_rva": {
+                  "type": ["integer", "null"],
+                  "minimum": 0
+                },
+                "module_rva_hex": {
+                  "type": ["string", "null"]
+                },
+                "confidence": {
+                  "type": ["number", "null"],
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "additionalProperties": false
+            }
           },
           "patch_skeleton": {
             "type": "object",

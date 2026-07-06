@@ -2398,7 +2398,8 @@ class MainWindow(QMainWindow):
             return (
                 "Commands: help, status, start, stop, settings, show, hide, tab <name>, "
                 "search <query>, search-clear, search-export [path], search-import [path], "
-                "correlate <capture> <root> [json|csv|markdown], apply <json>, refresh"
+                "correlate <capture> <root> [json|csv|markdown], "
+                "correlate-diff <baseline> <target> <root> [json|csv|markdown], apply <json>, refresh"
             )
         if command == "status":
             state = self.ipc_state_snapshot()
@@ -2481,6 +2482,36 @@ class MainWindow(QMainWindow):
                 result = correlate_capture_to_files(
                     capture_path,
                     root_path,
+                    max_total_matches=50,
+                    max_matches_per_evidence=10,
+                )
+                if output_format == "json":
+                    return json.dumps(result, ensure_ascii=False, indent=2)
+                if output_format == "csv":
+                    return render_correlation_csv(result)
+                return render_correlation_markdown(result)
+            except Exception as exc:
+                return f"Correlation failed: {exc}"
+        if command == "correlate-diff":
+            if len(parts) < 4:
+                return "Usage: correlate-diff <baseline.jsonl> <target.jsonl> <unpacked-root> [json|csv|markdown]"
+            baseline_path = Path(parts[1])
+            target_path = Path(parts[2])
+            root_path = Path(parts[3])
+            output_format = parts[4].lower() if len(parts) > 4 else "markdown"
+            if output_format not in {"json", "csv", "markdown"}:
+                return "Correlation format must be json, csv, or markdown."
+            if not baseline_path.exists():
+                return f"Baseline capture file not found: {baseline_path}"
+            if not target_path.exists():
+                return f"Target capture file not found: {target_path}"
+            if not root_path.exists() or not root_path.is_dir():
+                return f"Correlation root not found: {root_path}"
+            try:
+                result = correlate_capture_to_files(
+                    target_path,
+                    root_path,
+                    baseline_capture_path=baseline_path,
                     max_total_matches=50,
                     max_matches_per_evidence=10,
                 )

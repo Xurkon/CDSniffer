@@ -355,16 +355,72 @@ class ScannerTests(unittest.TestCase):
             md_text = render_correlation_markdown(result)
 
         self.assertGreaterEqual(len(evidence), 3)
-        self.assertGreaterEqual(result["match_count"], 3)
+        self.assertGreaterEqual(result["raw_match_count"], 3)
+        self.assertEqual(result["match_count"], 2)
         offsets = {match["offset"] for match in result["matches"]}
         self.assertIn(4, offsets)
         self.assertIn(13, offsets)
+        grouped = next(match for match in result["matches"] if match["offset"] == 4)
+        self.assertGreaterEqual(grouped["evidence_count"], 2)
+        self.assertIn("text:ascii", grouped["match_types"])
+        self.assertIn("hit-bytes", grouped["match_types"])
         self.assertIn("mission_table.bin", csv_text)
         self.assertIn("# CDSniffer Correlation Results", md_text)
+
+    def test_correlator_marks_target_only_against_baseline(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            unpacked = root / "unpacked"
+            unpacked.mkdir()
+            target = unpacked / "mission_table.bin"
+            target.write_bytes(b"Mission_A----Mission_B")
+            baseline_capture = root / "baseline.jsonl"
+            target_capture = root / "target.jsonl"
+            baseline_capture.write_text(json_line(capture_payload(["Mission_A"])), encoding="utf-8")
+            target_capture.write_text(json_line(capture_payload(["Mission_A", "Mission_B"])), encoding="utf-8")
+
+            result = correlate_capture_to_files(
+                target_capture,
+                unpacked,
+                baseline_capture_path=baseline_capture,
+                patterns=["*.bin"],
+                max_total_matches=10,
+            )
+
+        mission_a = next(match for match in result["matches"] if "Mission_A" in match["hit_texts"])
+        mission_b = next(match for match in result["matches"] if "Mission_B" in match["hit_texts"])
+        self.assertEqual(result["target_only_count"], 1)
+        self.assertEqual(result["shared_count"], 1)
+        self.assertEqual(mission_a["diff_status"], "shared-with-baseline")
+        self.assertEqual(mission_b["diff_status"], "target-only")
+        self.assertIn("target-only", mission_b["confidence_reasons"])
 
 
 def json_line(payload: dict) -> str:
     return json.dumps(payload, ensure_ascii=False) + "\n"
+
+
+def capture_payload(texts: list[str]) -> dict:
+    return {
+        "schema_version": 1,
+        "timestamp": "2026-01-01T00:00:00Z",
+        "regions": [
+            {
+                "base_address": 0x1000,
+                "region_size": 0x2000,
+                "hits": [
+                    {
+                        "address": 0x1000 + index * 0x10,
+                        "module_rva": index * 0x10,
+                        "encoding": "ascii",
+                        "text": text,
+                        "context": {"hit_bytes": text.encode("ascii").hex(" ")},
+                    }
+                    for index, text in enumerate(texts, start=1)
+                ],
+            }
+        ],
+    }
 
 
 if __name__ == "__main__":

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added grouped correlation candidates so duplicate evidence at the same file offset is merged into one ranked result
+- Added correlation evidence trails, evidence counts, confidence reasons, and raw match counts
+- Added baseline-vs-target correlation diffing with `target-only` and `shared-with-baseline` statuses
+- Added `--correlate-target` and `--correlate-baseline` CLI options for before/after capture analysis
+- Added a GUI terminal `correlate-diff <baseline> <target> <root> [json|csv|markdown]` command
 - Added an unpacked-file correlator that maps captured strings, hit bytes, and numeric candidate bytes to file offsets
 - Added CLI correlation flags with JSON, CSV, and Markdown output
 - Added generic patch skeletons to correlation matches with file path, offset, and original bytes
