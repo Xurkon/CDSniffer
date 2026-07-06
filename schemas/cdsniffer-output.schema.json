@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/cdsniffer-output.schema.json",
+  "title": "CDSniffer Output",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "timestamp",
+    "region_count",
+    "hit_count",
+    "unique_hit_count",
+    "top_hits",
+    "regions"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "region_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "hit_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "unique_hit_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "process": {
+      "type": "string"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["once", "loop", "hotkey"]
+    },
+    "label": {
+      "type": "string"
+    },
+    "hotkey": {
+      "type": "string"
+    },
+    "top_hits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["encoding", "text", "count", "first_address"],
+        "properties": {
+          "encoding": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "first_address": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "regions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["base_address", "region_size", "hits"],
+        "properties": {
+          "base_address": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "region_size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "hits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["address", "encoding", "text"],
+              "properties": {
+                "address": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "encoding": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": true
+}

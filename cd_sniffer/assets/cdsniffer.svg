@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#09111f"/>
+      <stop offset="100%" stop-color="#0d2740"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#65f3e1"/>
+      <stop offset="100%" stop-color="#4aa3ff"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.28  0 0 0 0 0.84  0 0 0 0 0.92  0 0 0 0.75 0"/>
+    </filter>
+  </defs>
+  <rect x="12" y="12" width="232" height="232" rx="56" fill="url(#bg)"/>
+  <circle cx="128" cy="128" r="78" fill="none" stroke="url(#accent)" stroke-width="10" opacity="0.18"/>
+  <circle cx="128" cy="128" r="98" fill="none" stroke="url(#accent)" stroke-width="6" opacity="0.08"/>
+  <g filter="url(#glow)" opacity="0.85">
+    <circle cx="118" cy="112" r="46" fill="none" stroke="url(#accent)" stroke-width="14" opacity="0.32"/>
+    <path d="M149 145 L186 182" stroke="url(#accent)" stroke-width="18" stroke-linecap="round"/>
+  </g>
+  <circle cx="118" cy="112" r="46" fill="none" stroke="url(#accent)" stroke-width="12"/>
+  <path d="M149 145 L186 182" stroke="url(#accent)" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="118" cy="112" r="21" fill="none" stroke="#eef8ff" stroke-opacity="0.92" stroke-width="8"/>
+  <path d="M168 66 C178 76, 184 90, 184 106" fill="none" stroke="#7ff7e7" stroke-width="8" stroke-linecap="round" opacity="0.92"/>
+  <path d="M177 57 C192 72, 200 92, 200 114" fill="none" stroke="#4aa3ff" stroke-width="8" stroke-linecap="round" opacity="0.72"/>
+  <path d="M75 173 C90 184, 110 191, 128 191 C151 191, 171 184, 189 171" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="10" stroke-linecap="round"/>
+</svg>

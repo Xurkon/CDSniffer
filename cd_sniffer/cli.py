@@ -1,0 +1,326 @@
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import sys
+import time
+from typing import Any
+
+from .core import (
+    build_comparison,
+    build_keywords,
+    build_manifest,
+    capture_once,
+    close_handle,
+    find_pid_by_name,
+    finalize_payload,
+    list_windows,
+    log_message,
+    load_signature_pack,
+    merge_signature_packs,
+    open_process,
+    prompt_for_window,
+    print_summary,
+    render_search_results_csv,
+    render_search_results_markdown,
+    search_capture_file,
+    search_capture_directory,
+    timestamped_output_path,
+    validate_regex_patterns,
+    vk_from_name,
+    write_manifest,
+    write_rendered_snapshot,
+    write_snapshot,
+)
+from .ipc import send_gui_command
+from .windows import find_pids_by_window_title, is_key_down
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="CDSniffer - Crimson Desert runtime memory logger")
+    parser.add_argument("--pid", type=int, help="Process ID to attach to")
+    parser.add_argument("--gui", action="store_true", help="Launch the GUI instead of running a capture")
+    parser.add_argument(
+        "--gui-command",
+        choices=["status", "show", "hide", "start", "stop", "open-settings", "refresh", "select-tab", "apply-settings"],
+        help="Send a command to a running GUI",
+    )
+    parser.add_argument("--gui-tab", help="Tab name used with --gui-command select-tab")
+    parser.add_argument("--gui-settings-file", help="JSON settings file used with --gui-command apply-settings")
+    parser.add_argument("--process", default="Crimson Desert", help="Process name fragment to locate")
+    parser.add_argument("--window-title", action="append", dest="window_titles", help="Window title fragment to locate")
+    parser.add_argument("--window-filter-regex", action="append", dest="window_filter_patterns", help="Regex that must match the window title")
+    parser.add_argument("--pick-window", action="store_true", help="Interactively choose from matching windows")
+    parser.add_argument("--list-windows", action="store_true", help="List matching windows and exit")
+    parser.add_argument("--mode", choices=["once", "loop", "hotkey"], default="loop", help="Capture mode")
+    parser.add_argument("--hotkey", default="F8", help="Polling hotkey for hotkey mode")
+    parser.add_argument("--interval", type=float, default=2.0, help="Seconds between loop captures")
+    parser.add_argument("--captures", type=int, help="Stop after this many captures")
+    parser.add_argument("--output", default="logs/cdsniffer.jsonl", help="Output file path")
+    parser.add_argument("--timestamp-output", action="store_true", help="Append a UTC timestamp to the output filename")
+    parser.add_argument("--session-name", default="cdsniffer", help="Base name used when timestamped output is enabled")
+    parser.add_argument("--format", choices=["jsonl", "json", "csv", "markdown"], default="jsonl", help="Output format")
+    parser.add_argument("--label", default="capture", help="Label to tag each snapshot")
+    parser.add_argument("--game-version", default="", help="Optional game version metadata to store with the capture")
+    parser.add_argument("--include-keyword", action="append", dest="include_keywords", help="Extra keyword to include")
+    parser.add_argument("--exclude-keyword", action="append", dest="exclude_keywords", help="Keyword to exclude")
+    parser.add_argument("--include-regex", action="append", dest="include_patterns", help="Regex that must match a hit")
+    parser.add_argument("--exclude-regex", action="append", dest="exclude_patterns", help="Regex that removes a hit")
+    parser.add_argument("--signature-pack", action="append", dest="signature_packs", help="Load extra filters from a file")
+    parser.add_argument("--max-region-size", type=int, default=16 * 1024 * 1024, help="Skip regions larger than this many bytes")
+    parser.add_argument("--max-regions", type=int, help="Stop after scanning this many matching regions")
+    parser.add_argument("--max-hits-per-region", type=int, help="Stop after this many hits in a single region")
+    parser.add_argument("--summary", choices=["none", "top-hits"], default="none", help="Print a live capture summary")
+    parser.add_argument("--summary-limit", type=int, default=10, help="How many top hits to show in summary mode")
+    parser.add_argument("--compare-last", action="store_true", help="Show the diff from the previous capture")
+    parser.add_argument("--compare-limit", type=int, default=20, help="How many added/removed strings to display")
+    parser.add_argument("--export-manifest", action="store_true", help="Write session metadata next to the output file")
+    parser.add_argument("--quiet", action="store_true", help="Reduce non-essential console output")
+    parser.add_argument("--verbose", action="store_true", help="Print extra capture diagnostics")
+    parser.add_argument("--watch-pattern", action="append", dest="watch_patterns", help="Regex that triggers an alert when matched")
+    parser.add_argument("--note", action="append", dest="notes", help="Freeform note to save with the capture session")
+    parser.add_argument("--search", help="Search an existing capture file and exit")
+    parser.add_argument("--search-file", help="Capture file to search; defaults to --output")
+    parser.add_argument("--search-dir", help="Search all capture files inside a directory and exit")
+    parser.add_argument("--search-recursive", action="store_true", default=True, help="Recursively search subfolders when using --search-dir")
+    parser.add_argument("--search-no-recursive", action="store_false", dest="search_recursive", help="Only search the top level when using --search-dir")
+    parser.add_argument(
+        "--search-glob",
+        action="append",
+        dest="search_globs",
+        help="File glob to include when searching a directory; may be repeated",
+    )
+    parser.add_argument("--search-regex", action="store_true", help="Treat --search as a regular expression")
+    parser.add_argument("--search-case-sensitive", action="store_true", help="Make --search case-sensitive")
+    parser.add_argument("--search-limit", type=int, default=200, help="Maximum number of matches to return")
+    parser.add_argument("--search-format", choices=["json", "csv", "markdown"], default="json", help="Format used for search results")
+    parser.add_argument("--search-output", help="Optional file path to write search results instead of printing them")
+    return parser.parse_args()
+
+
+def resolve_pid(args: argparse.Namespace) -> int | None:
+    if args.pid:
+        return args.pid
+
+    if args.window_titles:
+        for title in args.window_titles:
+            pids = find_pids_by_window_title(title)
+            if pids:
+                return pids[0]
+
+    pid = find_pid_by_name(args.process)
+    if pid:
+        return pid
+
+    return None
+
+
+def main() -> int:
+    args = parse_args()
+
+    if args.gui_command:
+        payload: dict[str, Any] | None = None
+        if args.gui_command == "select-tab":
+            payload = {"tab": args.gui_tab}
+        elif args.gui_command == "apply-settings":
+            if not args.gui_settings_file:
+                print("--gui-settings-file is required with --gui-command apply-settings")
+                return 1
+            try:
+                settings_data = Path(args.gui_settings_file).read_text(encoding="utf-8")
+                payload = {"settings": json.loads(settings_data)}
+            except Exception as exc:
+                print(f"Failed to load GUI settings file: {exc}")
+                return 1
+        result = send_gui_command(args.gui_command, payload)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.gui:
+        from .gui import main as gui_main
+
+        return gui_main()
+
+    if args.list_windows:
+        return list_windows(args)
+
+    if args.search:
+        try:
+            if args.search_dir:
+                search_root = Path(args.search_dir)
+                if not search_root.exists():
+                    print(f"Search directory not found: {search_root}")
+                    return 1
+                result = search_capture_directory(
+                    search_root,
+                    args.search,
+                    regex=args.search_regex,
+                    case_sensitive=args.search_case_sensitive,
+                    limit=args.search_limit,
+                    recursive=args.search_recursive,
+                    patterns=args.search_globs,
+                )
+            else:
+                search_path = Path(args.search_file or args.output)
+                if not search_path.exists():
+                    print(f"Search file not found: {search_path}")
+                    return 1
+                result = search_capture_file(
+                    search_path,
+                    args.search,
+                    regex=args.search_regex,
+                    case_sensitive=args.search_case_sensitive,
+                    limit=args.search_limit,
+                )
+        except Exception as exc:
+            print(f"Search failed: {exc}")
+            return 1
+        rendered: str
+        if args.search_format == "csv":
+            rendered = render_search_results_csv(result)
+        elif args.search_format == "markdown":
+            rendered = render_search_results_markdown(result)
+        else:
+            rendered = json.dumps(result, ensure_ascii=False, indent=2)
+        if args.search_output:
+            out_path = Path(args.search_output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(rendered, encoding="utf-8")
+            print(json.dumps({"written": str(out_path), "format": args.search_format}, ensure_ascii=False, indent=2))
+        else:
+            print(rendered)
+        return 0
+
+    merge_signature_packs(args)
+    try:
+        validate_regex_patterns(args.include_patterns, "--include-regex")
+        validate_regex_patterns(args.exclude_patterns, "--exclude-regex")
+        validate_regex_patterns(args.window_filter_patterns, "--window-filter-regex")
+        validate_regex_patterns(args.watch_patterns, "--watch-pattern")
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+
+    pid = resolve_pid(args)
+    prompted = False
+    if not pid and args.pick_window:
+        pid = prompt_for_window(args)
+        prompted = True
+    if not pid and sys.stdin.isatty() and not prompted:
+        pid = prompt_for_window(args)
+    if not pid:
+        print(f"Could not find process matching: {args.process}")
+        return 1
+
+    handle = open_process(pid)
+    output_path = timestamped_output_path(args.output, args.session_name) if args.timestamp_output else Path(args.output)
+    log_message(args, f"Game detected: attached to PID {pid}. Logging to {output_path}")
+    if args.mode == "hotkey":
+        log_message(args, f"Press {args.hotkey} to capture a snapshot. Ctrl+C to stop.")
+    try:
+        hotkey_vk = vk_from_name(args.hotkey)
+    except ValueError as exc:
+        close_handle(handle)
+        print(str(exc))
+        return 1
+
+    if args.export_manifest:
+        manifest = build_manifest(args, pid, output_path)
+        manifest_path = write_manifest(output_path, manifest)
+        log_message(args, f"Wrote manifest to {manifest_path}", verbose_only=True)
+
+    try:
+        include_keywords, exclude_keywords = build_keywords(args)
+        previous_payload: dict[str, Any] | None = None
+        if args.mode == "once":
+            payload = capture_once(handle, pid, args, include_keywords, exclude_keywords)
+            payload = finalize_payload(payload, args, output_path, previous_payload)
+            if args.format in {"csv", "markdown"}:
+                write_rendered_snapshot(output_path, payload, args.format)
+            else:
+                write_snapshot(output_path, payload, args.format)
+            print_summary(args, payload, args.summary, args.summary_limit)
+            if payload.get("watch_hits"):
+                log_message(args, f"Watch hit: {', '.join(payload['watch_hits'])}")
+            log_message(args, "Capture complete.")
+            return 0
+
+        if args.mode == "loop":
+            captures = 0
+            while True:
+                payload = capture_once(handle, pid, args, include_keywords, exclude_keywords)
+                payload = finalize_payload(payload, args, output_path, previous_payload)
+                if args.format in {"csv", "markdown"}:
+                    write_rendered_snapshot(output_path, payload, args.format)
+                else:
+                    write_snapshot(output_path, payload, args.format)
+                print_summary(args, payload, args.summary, args.summary_limit)
+                if payload.get("watch_hits"):
+                    log_message(args, f"Watch hit: {', '.join(payload['watch_hits'])}")
+                if args.compare_last and "comparison" in payload:
+                    comparison = payload["comparison"]
+                    log_message(
+                        args,
+                        f"Compare-last: +{comparison['added_count']} / -{comparison['removed_count']}",
+                        verbose_only=True,
+                    )
+                    if args.verbose:
+                        added = ", ".join(comparison["added"])
+                        removed = ", ".join(comparison["removed"])
+                        if added:
+                            log_message(args, f"  Added: {added}", verbose_only=True)
+                        if removed:
+                            log_message(args, f"  Removed: {removed}", verbose_only=True)
+                previous_payload = payload
+                captures += 1
+                if args.captures is not None and captures >= args.captures:
+                    log_message(args, "Capture limit reached.")
+                    return 0
+                time.sleep(args.interval)
+
+        captures = 0
+        last_hotkey_state = False
+        while True:
+            current_state = is_key_down(hotkey_vk)
+            if current_state and not last_hotkey_state:
+                payload = capture_once(handle, pid, args, include_keywords, exclude_keywords)
+                payload = finalize_payload(payload, args, output_path, previous_payload)
+                if args.format in {"csv", "markdown"}:
+                    write_rendered_snapshot(output_path, payload, args.format)
+                else:
+                    write_snapshot(output_path, payload, args.format)
+                print_summary(args, payload, args.summary, args.summary_limit)
+                if payload.get("watch_hits"):
+                    log_message(args, f"Watch hit: {', '.join(payload['watch_hits'])}")
+                if args.compare_last and "comparison" in payload:
+                    comparison = payload["comparison"]
+                    log_message(
+                        args,
+                        f"Compare-last: +{comparison['added_count']} / -{comparison['removed_count']}",
+                        verbose_only=True,
+                    )
+                    if args.verbose:
+                        added = ", ".join(comparison["added"])
+                        removed = ", ".join(comparison["removed"])
+                        if added:
+                            log_message(args, f"  Added: {added}", verbose_only=True)
+                        if removed:
+                            log_message(args, f"  Removed: {removed}", verbose_only=True)
+                previous_payload = payload
+                log_message(args, "Captured snapshot.")
+                captures += 1
+                if args.captures is not None and captures >= args.captures:
+                    log_message(args, "Capture limit reached.")
+                    return 0
+            last_hotkey_state = current_state
+            time.sleep(max(0.05, min(args.interval, 0.25)))
+    except KeyboardInterrupt:
+        log_message(args, "Stopped.")
+    finally:
+        close_handle(handle)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
