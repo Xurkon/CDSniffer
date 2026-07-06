@@ -27,6 +27,7 @@ For compiled releases, the clean target is two executables:
 - Records region provenance, module metadata, and module-relative RVA when available
 - Can capture byte context around each hit for nearby hex/ID analysis
 - Can decode nearby integer candidates from captured byte context
+- Can correlate captured strings, hit bytes, and numeric candidates back to unpacked file offsets
 - Can gate captures until camp mission UI sentinel strings are present in memory
 - Can write only new unique hit text values during a capture session
 - Searches captured payloads from the CLI and the GUI
@@ -167,6 +168,32 @@ python -m cd_sniffer --search "Mission_" --search-dir logs --search-format csv -
 python -m cd_sniffer --search "Mission_" --search-dir logs --search-format markdown --search-output logs\search-results.md
 ```
 
+Correlate a capture against unpacked files:
+
+```powershell
+python -m cd_sniffer --correlate-capture logs\camp-mission.jsonl --correlate-root D:\Documents\CrimsonDesertMods\unpacked --correlate-glob *.json --correlate-glob *.paseq --correlate-format markdown --correlate-output logs\correlation.md
+```
+
+Useful correlation options:
+
+- `--correlate-capture` points to a CDSniffer JSON or JSONL capture
+- `--correlate-root` points to the unpacked/game file tree to scan
+- `--correlate-glob` limits scanned files by glob and can be repeated
+- `--correlate-max-file-size` skips huge files
+- `--correlate-max-matches` limits total results
+- `--correlate-no-numeric` skips decoded numeric candidate bytes
+- `--correlate-format json|csv|markdown` controls the report format
+- `--correlate-output` writes the report to a file
+
+Correlation results include:
+
+- Matching file path and file offset
+- Match type, such as text, hit bytes, or decoded numeric candidate bytes
+- Original bytes at the file offset
+- Runtime address and module-relative RVA when available
+- Confidence score
+- A generic byte patch skeleton with file, offset, original bytes, and empty replacement bytes
+
 Search the live GUI capture:
 
 - Use the search box on the `Real-Time` tab
@@ -175,6 +202,7 @@ Search the live GUI capture:
 - Toggle `Filter top-hits table` when you want only the matching rows in the hit list
 - Use the embedded terminal with `search <query>` or `search-clear`
 - Use the embedded terminal with `search-export [path]` and `search-import [path]` to manage search presets
+- Use the embedded terminal with `correlate <capture> <root> [json|csv|markdown]` to run a compact file-offset report
 - Matching text is highlighted directly in the live raw snapshot view
 - Use the `Recent` dropdown to reuse previous searches
 - Use the saved-search controls to store and restore named search presets
@@ -202,8 +230,9 @@ The most reliable way to get the exact data you want is:
 7. Keep the capture window small with `--captures 1` or a short hotkey session so the log only contains the relevant state.
 8. Use `--include-regex` to focus on families you already know, and `--exclude-regex` to filter noisy quest or story strings.
 9. Compare the resulting strings against unpacked tables and keep only the entries that consistently show up in the correct camp UI.
-10. Prefer module-relative `module_rva` over absolute `address` whenever it is available; absolute addresses can shift between launches.
-11. If a string appears in multiple game systems, prefer the one that is unique to the camp/dispatch screen over one that also appears in player quests.
+10. Run `--correlate-capture` against the unpacked file tree to find candidate file offsets and original bytes.
+11. Prefer module-relative `module_rva` over absolute `address` whenever it is available; absolute addresses can shift between launches.
+12. If a string appears in multiple game systems, prefer the one that is unique to the camp/dispatch screen over one that also appears in player quests.
 
 In practice, that means the best workflow is to:
 
@@ -246,7 +275,8 @@ python -m cd_sniffer --mode hotkey --hotkey F8 --window-title "Crimson Desert" -
 Good next steps before opening this up more broadly:
 
 - Add exact GUI smoke tests with the `PySide6` extra installed
-- Add the unpacked-file correlator that maps captured strings/bytes to file offsets and DMM patch candidates
+- Add DMM-specific patch emitters on top of the generic correlation patch skeletons
+- Add known-format parsers for PASEQ, quest/mission tables, hashes, and little-endian structures
 - Add confidence scoring across baseline/target capture sessions
 - Add a build/release script for `cdsniffer.exe` and `cdsniffer-gui.exe`
 - Add a random session token to the localhost GUI IPC channel
@@ -261,6 +291,7 @@ Good next steps before opening this up more broadly:
 - If the camp gate misses a UI state, use `--capture-gate custom` with `--gate-keyword` or `--gate-regex` from a known visible label.
 - If the process name lookup is unreliable, prefer `--window-title` or `--pid`.
 - The JSON schema for capture output lives in `schemas/cdsniffer-output.schema.json`.
+- The JSON schema for correlation output lives in `schemas/cdsniffer-correlation.schema.json`.
 - The detailed project history lives in `CHANGELOG.md`.
 - The GUI is optional and needs `pip install .[gui]`.
 - The main GUI capture tab is intentionally a dashboard; all editable settings live in the settings dialog.

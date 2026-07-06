@@ -5,9 +5,12 @@ import html
 import json
 import importlib.resources as resources
 import queue
+import shlex
 import threading
 from pathlib import Path
 from typing import Any, Callable
+
+from .correlator import correlate_capture_to_files, render_correlation_csv, render_correlation_markdown
 
 try:
     from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
@@ -2384,14 +2387,18 @@ class MainWindow(QMainWindow):
                 self.append_log(f"Unknown IPC command: {command.command}")
 
     def execute_terminal_command(self, line: str) -> str:
-        parts = line.split()
+        try:
+            parts = [part.strip('"') for part in shlex.split(line, posix=False)]
+        except ValueError as exc:
+            return f"Invalid command: {exc}"
         if not parts:
             return ""
         command = parts[0].lower()
         if command in {"help", "?"}:
             return (
                 "Commands: help, status, start, stop, settings, show, hide, tab <name>, "
-                "search <query>, search-clear, search-export [path], search-import [path], apply <json>, refresh"
+                "search <query>, search-clear, search-export [path], search-import [path], "
+                "correlate <capture> <root> [json|csv|markdown], apply <json>, refresh"
             )
         if command == "status":
             state = self.ipc_state_snapshot()
@@ -2458,6 +2465,32 @@ class MainWindow(QMainWindow):
                 return f"Search state imported from {source}."
             except Exception as exc:
                 return f"Import failed: {exc}"
+        if command == "correlate":
+            if len(parts) < 3:
+                return "Usage: correlate <capture.jsonl> <unpacked-root> [json|csv|markdown]"
+            capture_path = Path(parts[1])
+            root_path = Path(parts[2])
+            output_format = parts[3].lower() if len(parts) > 3 else "markdown"
+            if output_format not in {"json", "csv", "markdown"}:
+                return "Correlation format must be json, csv, or markdown."
+            if not capture_path.exists():
+                return f"Capture file not found: {capture_path}"
+            if not root_path.exists() or not root_path.is_dir():
+                return f"Correlation root not found: {root_path}"
+            try:
+                result = correlate_capture_to_files(
+                    capture_path,
+                    root_path,
+                    max_total_matches=50,
+                    max_matches_per_evidence=10,
+                )
+                if output_format == "json":
+                    return json.dumps(result, ensure_ascii=False, indent=2)
+                if output_format == "csv":
+                    return render_correlation_csv(result)
+                return render_correlation_markdown(result)
+            except Exception as exc:
+                return f"Correlation failed: {exc}"
         if command == "tab" and len(parts) > 1:
             tab_name = " ".join(parts[1:]).strip()
             for index in range(self.tabs.count()):

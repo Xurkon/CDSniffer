@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/cdsniffer-correlation.schema.json",
+  "title": "CDSniffer Correlation Output",
+  "type": "object",
+  "required": ["schema_version", "created_at", "capture_path", "root", "evidence_count", "file_count", "match_count", "matches"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "capture_path": {
+      "type": "string"
+    },
+    "root": {
+      "type": "string"
+    },
+    "recursive": {
+      "type": "boolean"
+    },
+    "patterns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "max_file_size": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "evidence_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "file_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "match_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "matches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["file", "offset", "offset_hex", "match_type", "original_bytes", "confidence", "patch_skeleton"],
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "relative_file": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "offset_hex": {
+            "type": "string"
+          },
+          "match_type": {
+            "type": "string"
+          },
+          "evidence_id": {
+            "type": "string"
+          },
+          "evidence_value": {
+            "type": "string"
+          },
+          "hit_text": {
+            "type": "string"
+          },
+          "snapshot_index": {
+            "type": ["integer", "null"],
+            "minimum": 1
+          },
+          "hit_index": {
+            "type": ["integer", "null"],
+            "minimum": 1
+          },
+          "runtime_address": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "runtime_address_hex": {
+            "type": ["string", "null"]
+          },
+          "module_rva": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "module_rva_hex": {
+            "type": ["string", "null"]
+          },
+          "original_bytes": {
+            "type": "string"
+          },
+          "context_hex": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "patch_skeleton": {
+            "type": "object",
+            "required": ["type", "file", "offset", "original", "replacement"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "bytes"
+              },
+              "file": {
+                "type": "string"
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "original": {
+                "type": "string"
+              },
+              "replacement": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

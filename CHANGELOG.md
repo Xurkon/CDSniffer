@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added an unpacked-file correlator that maps captured strings, hit bytes, and numeric candidate bytes to file offsets
+- Added CLI correlation flags with JSON, CSV, and Markdown output
+- Added generic patch skeletons to correlation matches with file path, offset, and original bytes
+- Added a GUI terminal `correlate <capture> <root> [json|csv|markdown]` command
 - Added module and region provenance to captures, including module name/path/base, region protection/type, region offsets, and module-relative RVA
 - Added optional hit byte context capture with `--context-bytes`
 - Added optional nearby integer candidate decoding with `--decode-context-numbers` and `--context-number-radius`

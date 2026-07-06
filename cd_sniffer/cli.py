@@ -7,6 +7,11 @@ import sys
 import time
 from typing import Any
 
+from .correlator import (
+    correlate_capture_to_files,
+    render_correlation_csv,
+    render_correlation_markdown,
+)
 from .core import (
     CAPTURE_GATE_MATCH_MODES,
     CAPTURE_GATE_MODES,
@@ -120,6 +125,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--search-limit", type=int, default=200, help="Maximum number of matches to return")
     parser.add_argument("--search-format", choices=["json", "csv", "markdown"], default="json", help="Format used for search results")
     parser.add_argument("--search-output", help="Optional file path to write search results instead of printing them")
+    parser.add_argument("--correlate-capture", help="Capture JSON/JSONL file to correlate against unpacked files")
+    parser.add_argument("--correlate-root", help="Root directory of unpacked/game files to scan")
+    parser.add_argument("--correlate-recursive", action="store_true", default=True, help="Recursively scan subfolders for correlation")
+    parser.add_argument("--correlate-no-recursive", action="store_false", dest="correlate_recursive", help="Only scan the top level for correlation")
+    parser.add_argument("--correlate-glob", action="append", dest="correlate_globs", help="File glob to include during correlation; may be repeated")
+    parser.add_argument("--correlate-max-file-size", type=int, default=64 * 1024 * 1024, help="Skip files larger than this many bytes during correlation")
+    parser.add_argument("--correlate-max-matches", type=int, default=500, help="Maximum total correlation matches to return")
+    parser.add_argument("--correlate-max-matches-per-evidence", type=int, default=20, help="Maximum file offsets per evidence item")
+    parser.add_argument("--correlate-no-numeric", action="store_false", dest="correlate_numeric", default=True, help="Do not correlate decoded numeric candidate bytes")
+    parser.add_argument("--correlate-context-bytes", type=int, default=16, help="Bytes around each file match to include in correlation output")
+    parser.add_argument("--correlate-format", choices=["json", "csv", "markdown"], default="json", help="Format used for correlation results")
+    parser.add_argument("--correlate-output", help="Optional file path to write correlation results instead of printing them")
     return parser.parse_args()
 
 
@@ -202,6 +219,61 @@ def main() -> int:
 
     if args.list_windows:
         return list_windows(args)
+
+    if args.correlate_capture:
+        if not args.correlate_root:
+            print("--correlate-root is required with --correlate-capture")
+            return 1
+        capture_path = Path(args.correlate_capture)
+        root_path = Path(args.correlate_root)
+        if not capture_path.exists():
+            print(f"Capture file not found: {capture_path}")
+            return 1
+        if not root_path.exists() or not root_path.is_dir():
+            print(f"Correlation root directory not found: {root_path}")
+            return 1
+        if args.correlate_max_file_size < 0:
+            print("--correlate-max-file-size cannot be negative")
+            return 1
+        if args.correlate_max_matches < 1:
+            print("--correlate-max-matches must be at least 1")
+            return 1
+        if args.correlate_max_matches_per_evidence < 1:
+            print("--correlate-max-matches-per-evidence must be at least 1")
+            return 1
+        if args.correlate_context_bytes < 0:
+            print("--correlate-context-bytes cannot be negative")
+            return 1
+        try:
+            result = correlate_capture_to_files(
+                capture_path,
+                root_path,
+                recursive=args.correlate_recursive,
+                patterns=args.correlate_globs,
+                max_file_size=args.correlate_max_file_size,
+                max_matches_per_evidence=args.correlate_max_matches_per_evidence,
+                max_total_matches=args.correlate_max_matches,
+                include_numeric=args.correlate_numeric,
+                context_bytes=args.correlate_context_bytes,
+            )
+        except Exception as exc:
+            print(f"Correlation failed: {exc}")
+            return 1
+
+        if args.correlate_format == "csv":
+            rendered = render_correlation_csv(result)
+        elif args.correlate_format == "markdown":
+            rendered = render_correlation_markdown(result)
+        else:
+            rendered = json.dumps(result, ensure_ascii=False, indent=2)
+        if args.correlate_output:
+            out_path = Path(args.correlate_output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(rendered, encoding="utf-8")
+            print(json.dumps({"written": str(out_path), "format": args.correlate_format}, ensure_ascii=False, indent=2))
+        else:
+            print(rendered)
+        return 0
 
     if args.search:
         try:

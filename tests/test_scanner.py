@@ -1,4 +1,5 @@
 import argparse
+import json
 from pathlib import Path
 import sys
 import unittest
@@ -8,6 +9,12 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from cd_sniffer.cli import build_comparison, load_signature_pack, timestamped_output_path
+from cd_sniffer.correlator import (
+    correlate_capture_to_files,
+    extract_evidence_from_capture,
+    render_correlation_csv,
+    render_correlation_markdown,
+)
 from cd_sniffer.core import (
     build_capture_gate_filters,
     capture_gate_matches,
@@ -296,6 +303,68 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("capture.jsonl", csv_text)
         self.assertIn("# CDSniffer Search Results", md_text)
         self.assertIn("Mission_One", md_text)
+
+    def test_correlator_finds_string_hit_bytes_and_numeric_candidates(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            capture = root / "capture.jsonl"
+            unpacked = root / "unpacked"
+            unpacked.mkdir()
+            target = unpacked / "mission_table.bin"
+            target.write_bytes(b"xxxxMission_A\x39\x30yyyy")
+            capture.write_text(
+                json_line(
+                    {
+                        "schema_version": 1,
+                        "timestamp": "2026-01-01T00:00:00Z",
+                        "regions": [
+                            {
+                                "base_address": 0x1000,
+                                "region_size": 0x2000,
+                                "hits": [
+                                    {
+                                        "address": 0x1010,
+                                        "module_rva": 0x10,
+                                        "encoding": "ascii",
+                                        "text": "Mission_A",
+                                        "context": {
+                                            "hit_bytes": b"Mission_A".hex(" "),
+                                            "numeric_candidates": [
+                                                {
+                                                    "address": 0x1019,
+                                                    "relative_offset": 9,
+                                                    "size": 2,
+                                                    "endian": "little",
+                                                    "value": 12345,
+                                                    "hex": b"\x39\x30".hex(" "),
+                                                }
+                                            ],
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            evidence = extract_evidence_from_capture(capture)
+            result = correlate_capture_to_files(capture, unpacked, patterns=["*.bin"], max_total_matches=10)
+            csv_text = render_correlation_csv(result)
+            md_text = render_correlation_markdown(result)
+
+        self.assertGreaterEqual(len(evidence), 3)
+        self.assertGreaterEqual(result["match_count"], 3)
+        offsets = {match["offset"] for match in result["matches"]}
+        self.assertIn(4, offsets)
+        self.assertIn(13, offsets)
+        self.assertIn("mission_table.bin", csv_text)
+        self.assertIn("# CDSniffer Correlation Results", md_text)
+
+
+def json_line(payload: dict) -> str:
+    return json.dumps(payload, ensure_ascii=False) + "\n"
 
 
 if __name__ == "__main__":
