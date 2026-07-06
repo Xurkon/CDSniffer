@@ -8,6 +8,8 @@ from io import StringIO
 from pathlib import Path
 from typing import Any, Iterable
 
+from .format_analyzers import analyze_match_format, summarize_format_hints
+
 
 @dataclass(frozen=True)
 class Evidence:
@@ -240,6 +242,7 @@ def _collect_raw_matches(
     max_matches_per_evidence: int,
     max_total_matches: int,
     context_bytes: int,
+    include_format_hints: bool,
 ) -> list[dict[str, Any]]:
     matches: list[dict[str, Any]] = []
     raw_limit = _raw_match_limit(max_total_matches)
@@ -261,6 +264,11 @@ def _collect_raw_matches(
                 end = min(len(blob), offset + len(evidence.data) + context_bytes)
                 original = blob[offset : offset + len(evidence.data)]
                 relative_file = str(file_path.relative_to(root)) if _is_relative_to(file_path, root) else str(file_path)
+                format_info = (
+                    analyze_match_format(file_path, blob, offset, original, evidence.value, evidence.hit_text)
+                    if include_format_hints
+                    else {"file_format": file_path.suffix.lower().lstrip(".") or "binary", "format_confidence_bonus": 0.0, "format_hints": []}
+                )
                 matches.append(
                     {
                         "file": str(file_path),
@@ -279,6 +287,9 @@ def _collect_raw_matches(
                         "module_rva_hex": f"0x{evidence.module_rva:X}" if evidence.module_rva is not None else None,
                         "original_bytes": original.hex(" "),
                         "context_hex": blob[start:end].hex(" "),
+                        "file_format": format_info["file_format"],
+                        "format_confidence_bonus": format_info["format_confidence_bonus"],
+                        "format_hints": format_info["format_hints"],
                         "confidence": _confidence_for_match(evidence, len(offsets), len(blob)),
                         "patch_skeleton": {
                             "type": "bytes",
@@ -312,6 +323,8 @@ def _evidence_entry(match: dict[str, Any]) -> dict[str, Any]:
         "module_rva": match.get("module_rva"),
         "module_rva_hex": match.get("module_rva_hex"),
         "confidence": match.get("confidence"),
+        "file_format": match.get("file_format"),
+        "format_hints": match.get("format_hints", []),
     }
 
 
@@ -340,8 +353,41 @@ def _aggregate_confidence(group: dict[str, Any]) -> tuple[float, list[str]]:
         reasons.append("repeated-snapshots")
     if any(item.get("module_rva") is not None for item in evidence if isinstance(item, dict)):
         reasons.append("module-rva")
+    format_bonus = float(group.get("format_confidence_bonus", 0.0) or 0.0)
+    if format_bonus:
+        confidence += format_bonus
+        hint_kinds = {str(item.get("kind", "")) for item in group.get("format_hints", []) if item.get("kind")}
+        if "json-record" in hint_kinds:
+            reasons.append("json-structure")
+        if "paseq-binary" in hint_kinds:
+            reasons.append("paseq-binary")
+        if {"little-endian-context", "matched-integer"} & hint_kinds:
+            reasons.append("little-endian-context")
+        if hint_kinds and "format-context" not in reasons:
+            reasons.append("format-context")
 
     return round(max(0.0, min(1.0, confidence)), 3), reasons
+
+
+def _hint_key(hint: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        str(hint.get("kind", "")),
+        str(hint.get("summary", "")),
+        str(hint.get("path", "")),
+        str(hint.get("value", "")),
+    )
+
+
+def _merge_format_hints(existing: list[dict[str, Any]], incoming: list[dict[str, Any]]) -> None:
+    seen = {_hint_key(item) for item in existing}
+    for hint in incoming:
+        key = _hint_key(hint)
+        if key in seen:
+            continue
+        seen.add(key)
+        existing.append(hint)
+        if len(existing) >= 12:
+            break
 
 
 def aggregate_correlation_matches(raw_matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -370,6 +416,9 @@ def aggregate_correlation_matches(raw_matches: list[dict[str, Any]]) -> list[dic
                 "module_rva_hex": match.get("module_rva_hex"),
                 "original_bytes": match.get("original_bytes"),
                 "context_hex": match.get("context_hex"),
+                "file_format": match.get("file_format"),
+                "format_confidence_bonus": 0.0,
+                "format_hints": [],
                 "patch_skeleton": match.get("patch_skeleton"),
                 "diff_status": "uncompared",
                 "evidence": [],
@@ -385,6 +434,11 @@ def aggregate_correlation_matches(raw_matches: list[dict[str, Any]]) -> list[dic
         _append_unique(group["evidence_values"], match.get("evidence_value"))
         _append_unique(group["hit_texts"], match.get("hit_text"))
         _append_unique(group["snapshots"], match.get("snapshot_index"))
+        group["format_confidence_bonus"] = max(
+            float(group.get("format_confidence_bonus", 0.0) or 0.0),
+            float(match.get("format_confidence_bonus", 0.0) or 0.0),
+        )
+        _merge_format_hints(group["format_hints"], list(match.get("format_hints", [])))
 
     matches: list[dict[str, Any]] = []
     for group in grouped.values():
@@ -395,6 +449,7 @@ def aggregate_correlation_matches(raw_matches: list[dict[str, Any]]) -> list[dic
         group["match_type"] = ", ".join(str(item) for item in group["match_types"])
         group["evidence_value"] = ", ".join(str(item) for item in group["evidence_values"])
         group["hit_text"] = ", ".join(str(item) for item in group["hit_texts"])
+        group["format_hint_summary"] = summarize_format_hints(group["format_hints"])
         matches.append(group)
     return matches
 
@@ -441,6 +496,7 @@ def correlate_capture_to_files(
     max_total_matches: int = 500,
     include_numeric: bool = True,
     context_bytes: int = 16,
+    include_format_hints: bool = True,
 ) -> dict[str, Any]:
     max_matches_per_evidence = max(1, max_matches_per_evidence)
     max_total_matches = max(1, max_total_matches)
@@ -456,6 +512,7 @@ def correlate_capture_to_files(
         max_matches_per_evidence=max_matches_per_evidence,
         max_total_matches=max_total_matches,
         context_bytes=context_bytes,
+        include_format_hints=include_format_hints,
     )
     matches = aggregate_correlation_matches(raw_matches)
     baseline_evidence_count = 0
@@ -472,6 +529,7 @@ def correlate_capture_to_files(
             max_matches_per_evidence=max_matches_per_evidence,
             max_total_matches=max_total_matches,
             context_bytes=context_bytes,
+            include_format_hints=include_format_hints,
         )
         baseline_matches = aggregate_correlation_matches(baseline_raw_matches)
         baseline_match_count = len(baseline_matches)
@@ -499,6 +557,7 @@ def correlate_capture_to_files(
         "baseline_match_count": baseline_match_count,
         "target_only_count": target_only_count,
         "shared_count": shared_count,
+        "format_hint_count": sum(len(match.get("format_hints", [])) for match in matches),
         "file_count": len(files),
         "match_count": len(matches),
         "matches": matches,
@@ -523,6 +582,8 @@ def flatten_correlation_results(result: dict[str, Any]) -> list[dict[str, Any]]:
             "diff_status": match.get("diff_status"),
             "evidence_count": match.get("evidence_count"),
             "match_type": match.get("match_type"),
+            "file_format": match.get("file_format"),
+            "format_hint_summary": match.get("format_hint_summary"),
             "evidence_value": match.get("evidence_value"),
             "hit_text": match.get("hit_text"),
             "original_bytes": match.get("original_bytes"),
@@ -544,6 +605,8 @@ def render_correlation_csv(result: dict[str, Any]) -> str:
         "diff_status",
         "evidence_count",
         "match_type",
+        "file_format",
+        "format_hint_summary",
         "evidence_value",
         "hit_text",
         "original_bytes",
@@ -565,6 +628,7 @@ def render_correlation_markdown(result: dict[str, Any]) -> str:
         f"- Evidence: `{result.get('evidence_count', 0)}`",
         f"- Files scanned: `{result.get('file_count', 0)}`",
         f"- Matches: `{result.get('match_count', 0)}`",
+        f"- Format hints: `{result.get('format_hint_count', 0)}`",
     ]
     if result.get("baseline_capture_path"):
         lines.extend(
@@ -577,20 +641,21 @@ def render_correlation_markdown(result: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
-            "| Confidence | Diff | File | Offset | Type | Evidence | Count | Reasons | Original Bytes |",
-            "| ---: | --- | --- | ---: | --- | --- | ---: | --- | --- |",
+            "| Confidence | Diff | File | Offset | Type | Format | Evidence | Count | Reasons | Format Hints | Original Bytes |",
+            "| ---: | --- | --- | ---: | --- | --- | --- | ---: | --- | --- | --- |",
         ]
     )
     rows = flatten_correlation_results(result)
     if not rows:
-        lines.append("| - | - | - | - | - | No matches | - | - | - |")
+        lines.append("| - | - | - | - | - | - | No matches | - | - | - | - |")
         return "\n".join(lines) + "\n"
     for row in rows:
         file_path = str(row.get("file", "")).replace("|", "\\|")
         evidence = str(row.get("evidence_value", "")).replace("|", "\\|")
         original = str(row.get("original_bytes", "")).replace("|", "\\|")
         reasons = str(row.get("confidence_reasons", "")).replace("|", "\\|")
+        format_hints = str(row.get("format_hint_summary", "")).replace("|", "\\|")
         lines.append(
-            f"| {row.get('confidence', '')} | {row.get('diff_status', '')} | {file_path} | `{row.get('offset_hex', '')}` | {row.get('match_type', '')} | {evidence} | {row.get('evidence_count', '')} | {reasons} | `{original}` |"
+            f"| {row.get('confidence', '')} | {row.get('diff_status', '')} | {file_path} | `{row.get('offset_hex', '')}` | {row.get('match_type', '')} | {row.get('file_format', '')} | {evidence} | {row.get('evidence_count', '')} | {reasons} | {format_hints} | `{original}` |"
         )
     return "\n".join(lines) + "\n"

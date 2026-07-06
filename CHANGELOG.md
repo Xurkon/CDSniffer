@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added format-aware correlation hints for JSON/JSONL records, text offsets, PASEQ candidates, nearby printable strings, and little-endian integers
+- Added `file_format`, `format_hints`, `format_hint_summary`, and `format_hint_count` to correlation reports
+- Added `--correlate-no-format-hints` for faster raw-byte-only correlation scans
 - Added grouped correlation candidates so duplicate evidence at the same file offset is merged into one ranked result
 - Added correlation evidence trails, evidence counts, confidence reasons, and raw match counts
 - Added baseline-vs-target correlation diffing with `target-only` and `shared-with-baseline` statuses

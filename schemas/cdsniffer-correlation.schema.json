@@ -59,6 +59,10 @@
       "type": "integer",
       "minimum": 0
     },
+    "format_hint_count": {
+      "type": "integer",
+      "minimum": 0
+    },
     "file_count": {
       "type": "integer",
       "minimum": 0
@@ -125,6 +129,23 @@
           },
           "context_hex": {
             "type": "string"
+          },
+          "file_format": {
+            "type": ["string", "null"]
+          },
+          "format_confidence_bonus": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "format_hint_summary": {
+            "type": "string"
+          },
+          "format_hints": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/format_hint"
+            }
           },
           "confidence": {
             "type": "number",
@@ -213,6 +234,15 @@
                   "type": ["number", "null"],
                   "minimum": 0,
                   "maximum": 1
+                },
+                "file_format": {
+                  "type": ["string", "null"]
+                },
+                "format_hints": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/format_hint"
+                  }
                 }
               },
               "additionalProperties": false
@@ -245,6 +275,44 @@
         },
         "additionalProperties": false
       }
+    }
+  },
+  "$defs": {
+    "format_hint": {
+      "type": "object",
+      "required": ["kind", "summary", "confidence_bonus"],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "confidence_bonus": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "path": {
+          "type": ["string", "null"]
+        },
+        "line": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "column": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "value": {
+          "type": ["string", "null"]
+        },
+        "details": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

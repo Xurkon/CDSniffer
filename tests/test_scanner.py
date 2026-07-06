@@ -395,6 +395,56 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(mission_b["diff_status"], "target-only")
         self.assertIn("target-only", mission_b["confidence_reasons"])
 
+    def test_correlator_adds_json_record_format_hints(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            unpacked = root / "unpacked"
+            unpacked.mkdir()
+            target = unpacked / "missioninfo.json"
+            target.write_text(
+                json.dumps(
+                    [
+                        {
+                            "Key": 1001,
+                            "Internal Name": "Mission_A",
+                            "Display Name": "Simple Farming",
+                            "Required Members": "2~4",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            capture = root / "capture.jsonl"
+            capture.write_text(json_line(capture_payload(["Mission_A"])), encoding="utf-8")
+
+            result = correlate_capture_to_files(capture, unpacked, patterns=["*.json"], max_total_matches=10)
+
+        match = result["matches"][0]
+        hint_kinds = {hint["kind"] for hint in match["format_hints"]}
+        self.assertEqual(match["file_format"], "json")
+        self.assertIn("json-record", hint_kinds)
+        self.assertIn("json-structure", match["confidence_reasons"])
+        self.assertIn("Key=1001", match["format_hint_summary"])
+        self.assertGreater(result["format_hint_count"], 0)
+
+    def test_correlator_adds_paseq_binary_format_hints(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            unpacked = root / "unpacked"
+            unpacked.mkdir()
+            target = unpacked / "mission_flow.paseq"
+            target.write_bytes(b"\x39\x30\x00\x00xxxxMission_Ayyyy")
+            capture = root / "capture.jsonl"
+            capture.write_text(json_line(capture_payload(["Mission_A"])), encoding="utf-8")
+
+            result = correlate_capture_to_files(capture, unpacked, patterns=["*.paseq"], max_total_matches=10)
+
+        match = result["matches"][0]
+        hint_kinds = {hint["kind"] for hint in match["format_hints"]}
+        self.assertEqual(match["file_format"], "paseq")
+        self.assertIn("paseq-binary", hint_kinds)
+        self.assertIn("little-endian-context", match["confidence_reasons"])
+
 
 def json_line(payload: dict) -> str:
     return json.dumps(payload, ensure_ascii=False) + "\n"

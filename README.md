@@ -30,6 +30,7 @@ For compiled releases, the clean target is two executables:
 - Can correlate captured strings, hit bytes, and numeric candidates back to unpacked file offsets
 - Groups duplicate evidence at the same file offset so one candidate carries its full evidence trail
 - Can compare baseline and target captures to highlight target-only file-offset candidates
+- Adds format-aware correlation hints for JSON/JSONL records, text line locations, PASEQ candidates, nearby strings, and little-endian integers
 - Can gate captures until camp mission UI sentinel strings are present in memory
 - Can write only new unique hit text values during a capture session
 - Searches captured payloads from the CLI and the GUI
@@ -194,6 +195,7 @@ Useful correlation options:
 - `--correlate-max-matches-per-evidence` limits repeated offsets for one evidence item
 - `--correlate-context-bytes` includes surrounding file bytes in JSON output
 - `--correlate-no-numeric` skips decoded numeric candidate bytes
+- `--correlate-no-format-hints` skips JSON/text/binary analyzers for a faster raw-byte pass
 - `--correlate-format json|csv|markdown` controls the report format
 - `--correlate-output` writes the report to a file
 
@@ -201,8 +203,10 @@ Correlation results include:
 
 - Matching file path and file offset
 - Match type, such as text, hit bytes, or decoded numeric candidate bytes
+- File format, such as `json`, `paseq`, `txt`, or `binary`
 - Evidence count and evidence trail for grouped candidates
 - Confidence reasons such as exact hit bytes, text-and-bytes, nearby numeric evidence, or target-only
+- Format hints such as JSON record keys, text line/column, PASEQ candidate markers, nearby printable strings, and little-endian values
 - Diff status when a baseline is provided: `target-only` or `shared-with-baseline`
 - Original bytes at the file offset
 - Runtime address and module-relative RVA when available
@@ -247,8 +251,9 @@ The most reliable way to get the exact data you want is:
 8. Use `--include-regex` to focus on families you already know, and `--exclude-regex` to filter noisy quest or story strings.
 9. Compare the resulting strings against unpacked tables and keep only the entries that consistently show up in the correct camp UI.
 10. Run `--correlate-baseline` plus `--correlate-target` against the unpacked file tree and inspect `target-only` rows first.
-11. Prefer module-relative `module_rva` over absolute `address` whenever it is available; absolute addresses can shift between launches.
-12. If a string appears in multiple game systems, prefer the one that is unique to the camp/dispatch screen over one that also appears in player quests.
+11. Prefer rows with format hints that point to JSON record keys, mission-like tables, PASEQ candidates, or nearby little-endian values.
+12. Prefer module-relative `module_rva` over absolute `address` whenever it is available; absolute addresses can shift between launches.
+13. If a string appears in multiple game systems, prefer the one that is unique to the camp/dispatch screen over one that also appears in player quests.
 
 In practice, that means the best workflow is to:
 
@@ -292,7 +297,7 @@ Good next steps before opening this up more broadly:
 
 - Add exact GUI smoke tests with the `PySide6` extra installed
 - Add DMM-specific patch emitters on top of the generic correlation patch skeletons
-- Add known-format parsers for PASEQ, quest/mission tables, hashes, and little-endian structures
+- Expand format analyzers with deeper PASEQ, quest/mission table, hash, and typed record parsers
 - Add repeat-run confidence rollups across multiple target captures
 - Add a build/release script for `cdsniffer.exe` and `cdsniffer-gui.exe`
 - Add a random session token to the localhost GUI IPC channel

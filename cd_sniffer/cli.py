@@ -137,6 +137,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--correlate-max-matches-per-evidence", type=int, default=20, help="Maximum file offsets per evidence item")
     parser.add_argument("--correlate-no-numeric", action="store_false", dest="correlate_numeric", default=True, help="Do not correlate decoded numeric candidate bytes")
     parser.add_argument("--correlate-context-bytes", type=int, default=16, help="Bytes around each file match to include in correlation output")
+    parser.add_argument("--correlate-no-format-hints", action="store_false", dest="correlate_format_hints", default=True, help="Skip JSON/text/binary format hints during correlation")
     parser.add_argument("--correlate-format", choices=["json", "csv", "markdown"], default="json", help="Format used for correlation results")
     parser.add_argument("--correlate-output", help="Optional file path to write correlation results instead of printing them")
     return parser.parse_args()
@@ -267,6 +268,7 @@ def main() -> int:
                 max_total_matches=args.correlate_max_matches,
                 include_numeric=args.correlate_numeric,
                 context_bytes=args.correlate_context_bytes,
+                include_format_hints=args.correlate_format_hints,
             )
         except Exception as exc:
             print(f"Correlation failed: {exc}")
