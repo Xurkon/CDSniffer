@@ -388,6 +388,16 @@ class SettingsDialog(QDialog):
         self.max_hits_per_region.setSpecialValueText("Unlimited")
         max_hits_value = self._settings.get("max_hits_per_region")
         self.max_hits_per_region.setValue(int(max_hits_value) if max_hits_value else 0)
+        self.context_bytes = QSpinBox()
+        self.context_bytes.setRange(0, 4096)
+        self.context_bytes.setSingleStep(16)
+        self.context_bytes.setValue(int(self._settings.get("context_bytes", 0)))
+        self.decode_context_numbers = QCheckBox("Decode context numbers")
+        self.decode_context_numbers.setChecked(bool(self._settings.get("decode_context_numbers", False)))
+        self.context_number_radius = QSpinBox()
+        self.context_number_radius.setRange(0, 512)
+        self.context_number_radius.setSingleStep(4)
+        self.context_number_radius.setValue(int(self._settings.get("context_number_radius", 16)))
         self.gate_max_regions = QSpinBox()
         self.gate_max_regions.setRange(0, 1_000_000)
         self.gate_max_regions.setSpecialValueText("Unlimited")
@@ -418,6 +428,9 @@ class SettingsDialog(QDialog):
         form.addRow("Max Region Size", self.max_region_size)
         form.addRow("Max Regions", self.max_regions)
         form.addRow("Max Hits/Region", self.max_hits_per_region)
+        form.addRow("Context Bytes", self.context_bytes)
+        form.addRow("", self.decode_context_numbers)
+        form.addRow("Number Decode Radius", self.context_number_radius)
         form.addRow("Gate Max Regions", self.gate_max_regions)
         form.addRow("Gate Max Hits/Region", self.gate_max_hits_per_region)
         form.addRow("Summary", self.summary)
@@ -499,6 +512,9 @@ class SettingsDialog(QDialog):
             "max_region_size": int(self.max_region_size.value()),
             "max_regions": self.max_regions.value() or None,
             "max_hits_per_region": self.max_hits_per_region.value() or None,
+            "context_bytes": int(self.context_bytes.value()),
+            "decode_context_numbers": self.decode_context_numbers.isChecked(),
+            "context_number_radius": int(self.context_number_radius.value()),
             "gate_max_regions": self.gate_max_regions.value() or None,
             "gate_max_hits_per_region": self.gate_max_hits_per_region.value() or None,
             "summary": self.summary.currentText(),
@@ -667,6 +683,10 @@ class CaptureWorker(QObject):
         try:
             args = argparse.Namespace(**self.settings)
             merge_signature_packs(args)
+            if args.context_bytes < 0:
+                raise ValueError("context_bytes cannot be negative")
+            if args.context_number_radius < 0:
+                raise ValueError("context_number_radius cannot be negative")
             validate_regex_patterns(args.include_patterns, "--include-regex or signature pack include_patterns")
             validate_regex_patterns(args.exclude_patterns, "--exclude-regex or signature pack exclude_patterns")
             validate_regex_patterns(args.window_filter_patterns, "--window-filter-regex")
@@ -1007,6 +1027,16 @@ class MainWindow(QMainWindow):
         self.max_hits_per_region.setRange(0, 1_000_000)
         self.max_hits_per_region.setSpecialValueText("Unlimited")
         self.max_hits_per_region.setValue(0)
+        self.context_bytes_spin = QSpinBox()
+        self.context_bytes_spin.setRange(0, 4096)
+        self.context_bytes_spin.setSingleStep(16)
+        self.context_bytes_spin.setValue(0)
+        self.decode_context_numbers_check = QCheckBox("Decode context numbers")
+        self.decode_context_numbers_check.setChecked(False)
+        self.context_number_radius_spin = QSpinBox()
+        self.context_number_radius_spin.setRange(0, 512)
+        self.context_number_radius_spin.setSingleStep(4)
+        self.context_number_radius_spin.setValue(16)
         self.gate_max_regions_spin = QSpinBox()
         self.gate_max_regions_spin.setRange(0, 1_000_000)
         self.gate_max_regions_spin.setSpecialValueText("Unlimited")
@@ -1522,6 +1552,8 @@ class MainWindow(QMainWindow):
                     f"Hotkey: {self.hotkey_edit.text().strip() or 'F8'}",
                     f"Output: {self.output_edit.text().strip() or 'logs/cdsniffer.jsonl'}",
                     f"Format: {self.format_combo.currentText()}",
+                    f"Context bytes: {self.context_bytes_spin.value()}",
+                    f"Decode numbers: {'yes' if self.decode_context_numbers_check.isChecked() else 'no'}",
                     f"Capture gate: {self.capture_gate_combo.currentText()} / {self.capture_gate_match_combo.currentText()}",
                     f"Unique only: {'yes' if self.unique_only_check.isChecked() else 'no'}",
                     f"Summary: {self.summary_combo.currentText()}",
@@ -2011,6 +2043,13 @@ class MainWindow(QMainWindow):
             "max_region_size": 16 * 1024 * 1024 if not hasattr(self, "max_region_size") else int(self.max_region_size.value()),
             "max_regions": None if not hasattr(self, "max_regions") else (self.max_regions.value() or None),
             "max_hits_per_region": None if not hasattr(self, "max_hits_per_region") else (self.max_hits_per_region.value() or None),
+            "context_bytes": 0 if not hasattr(self, "context_bytes_spin") else int(self.context_bytes_spin.value()),
+            "decode_context_numbers": bool(
+                hasattr(self, "decode_context_numbers_check") and self.decode_context_numbers_check.isChecked()
+            ),
+            "context_number_radius": 16
+            if not hasattr(self, "context_number_radius_spin")
+            else int(self.context_number_radius_spin.value()),
             "gate_max_regions": None if not hasattr(self, "gate_max_regions_spin") else (self.gate_max_regions_spin.value() or None),
             "gate_max_hits_per_region": None
             if not hasattr(self, "gate_max_hits_per_region_spin")
@@ -2064,6 +2103,12 @@ class MainWindow(QMainWindow):
             self.max_regions.setValue(int(settings["max_regions"]) if settings.get("max_regions") else 0)
         if hasattr(self, "max_hits_per_region"):
             self.max_hits_per_region.setValue(int(settings["max_hits_per_region"]) if settings.get("max_hits_per_region") else 0)
+        if hasattr(self, "context_bytes_spin"):
+            self.context_bytes_spin.setValue(int(settings.get("context_bytes", 0)))
+        if hasattr(self, "decode_context_numbers_check"):
+            self.decode_context_numbers_check.setChecked(bool(settings.get("decode_context_numbers", False)))
+        if hasattr(self, "context_number_radius_spin"):
+            self.context_number_radius_spin.setValue(int(settings.get("context_number_radius", 16)))
         if hasattr(self, "gate_max_regions_spin"):
             self.gate_max_regions_spin.setValue(int(settings["gate_max_regions"]) if settings.get("gate_max_regions") else 0)
         if hasattr(self, "gate_max_hits_per_region_spin"):
@@ -2130,6 +2175,9 @@ class MainWindow(QMainWindow):
             "max_region_size": int(self.max_region_size.value()),
             "max_regions": self.max_regions.value() or None,
             "max_hits_per_region": self.max_hits_per_region.value() or None,
+            "context_bytes": int(self.context_bytes_spin.value()),
+            "decode_context_numbers": self.decode_context_numbers_check.isChecked(),
+            "context_number_radius": int(self.context_number_radius_spin.value()),
             "gate_keywords": split_values(self.gate_keywords_edit.toPlainText()),
             "gate_patterns": split_values(self.gate_regex_edit.toPlainText()),
             "gate_max_regions": self.gate_max_regions_spin.value() or None,
@@ -2212,6 +2260,10 @@ class MainWindow(QMainWindow):
             return
         try:
             args = self.build_settings_namespace()
+            if args.context_bytes < 0:
+                raise ValueError("context_bytes cannot be negative")
+            if args.context_number_radius < 0:
+                raise ValueError("context_number_radius cannot be negative")
             validate_regex_patterns(args.include_patterns, "--include-regex")
             validate_regex_patterns(args.exclude_patterns, "--exclude-regex")
             validate_regex_patterns(args.window_filter_patterns, "--window-filter-regex")

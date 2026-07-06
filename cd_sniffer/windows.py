@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import ctypes
 from ctypes import wintypes
+from pathlib import Path
 
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 user32 = ctypes.WinDLL("user32", use_last_error=True)
+try:
+    psapi = ctypes.WinDLL("psapi", use_last_error=True)
+except OSError:  # pragma: no cover - Windows normally has psapi.
+    psapi = None
 
 PROCESS_QUERY_INFORMATION = 0x0400
 PROCESS_VM_READ = 0x0010
@@ -17,6 +22,15 @@ MEM_PRIVATE = 0x20000
 
 PAGE_GUARD = 0x100
 PAGE_NOACCESS = 0x01
+PAGE_READONLY = 0x02
+PAGE_READWRITE = 0x04
+PAGE_WRITECOPY = 0x08
+PAGE_EXECUTE = 0x10
+PAGE_EXECUTE_READ = 0x20
+PAGE_EXECUTE_READWRITE = 0x40
+PAGE_EXECUTE_WRITECOPY = 0x80
+
+LIST_MODULES_ALL = 0x03
 
 WM_GETTEXT = 0x000D
 WM_GETTEXTLENGTH = 0x000E
@@ -30,6 +44,14 @@ class MEMORY_BASIC_INFORMATION(ctypes.Structure):
         ("State", wintypes.DWORD),
         ("Protect", wintypes.DWORD),
         ("Type", wintypes.DWORD),
+    ]
+
+
+class MODULEINFO(ctypes.Structure):
+    _fields_ = [
+        ("lpBaseOfDll", wintypes.LPVOID),
+        ("SizeOfImage", wintypes.DWORD),
+        ("EntryPoint", wintypes.LPVOID),
     ]
 
 
@@ -123,6 +145,106 @@ def is_readable_region(mbi: MEMORY_BASIC_INFORMATION) -> bool:
     if mbi.Type not in (MEM_IMAGE, MEM_MAPPED, MEM_PRIVATE):
         return False
     return True
+
+
+def memory_type_name(memory_type: int) -> str:
+    names = {
+        MEM_IMAGE: "MEM_IMAGE",
+        MEM_MAPPED: "MEM_MAPPED",
+        MEM_PRIVATE: "MEM_PRIVATE",
+    }
+    return names.get(int(memory_type), f"0x{int(memory_type):X}")
+
+
+def memory_state_name(state: int) -> str:
+    names = {
+        MEM_COMMIT: "MEM_COMMIT",
+    }
+    return names.get(int(state), f"0x{int(state):X}")
+
+
+def protection_name(protect: int) -> str:
+    protect = int(protect)
+    base = protect & 0xFF
+    names = {
+        PAGE_NOACCESS: "PAGE_NOACCESS",
+        PAGE_READONLY: "PAGE_READONLY",
+        PAGE_READWRITE: "PAGE_READWRITE",
+        PAGE_WRITECOPY: "PAGE_WRITECOPY",
+        PAGE_EXECUTE: "PAGE_EXECUTE",
+        PAGE_EXECUTE_READ: "PAGE_EXECUTE_READ",
+        PAGE_EXECUTE_READWRITE: "PAGE_EXECUTE_READWRITE",
+        PAGE_EXECUTE_WRITECOPY: "PAGE_EXECUTE_WRITECOPY",
+    }
+    parts = [names.get(base, f"0x{base:X}")]
+    if protect & PAGE_GUARD:
+        parts.append("PAGE_GUARD")
+    return "|".join(parts)
+
+
+def list_process_modules(handle: int) -> list[dict[str, object]]:
+    if psapi is None:
+        return []
+    if not all(
+        hasattr(psapi, name)
+        for name in ("EnumProcessModulesEx", "GetModuleInformation", "GetModuleFileNameExW")
+    ):
+        return []
+
+    module_size = ctypes.sizeof(ctypes.c_void_p)
+    needed = wintypes.DWORD()
+    count = 256
+    modules = None
+    while True:
+        modules = (ctypes.c_void_p * count)()
+        ok = psapi.EnumProcessModulesEx(
+            wintypes.HANDLE(handle),
+            modules,
+            ctypes.sizeof(modules),
+            ctypes.byref(needed),
+            LIST_MODULES_ALL,
+        )
+        if not ok:
+            return []
+        needed_count = max(0, needed.value // module_size)
+        if needed_count <= count:
+            break
+        count = needed_count
+
+    results: list[dict[str, object]] = []
+    for module in list(modules)[:needed_count]:
+        if not module:
+            continue
+        info = MODULEINFO()
+        ok = psapi.GetModuleInformation(
+            wintypes.HANDLE(handle),
+            ctypes.c_void_p(module),
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+        )
+        if not ok:
+            continue
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = psapi.GetModuleFileNameExW(
+            wintypes.HANDLE(handle),
+            ctypes.c_void_p(module),
+            buffer,
+            len(buffer),
+        )
+        path = buffer.value[:length] if length else ""
+        base_address = int(ctypes.cast(info.lpBaseOfDll, ctypes.c_void_p).value or 0)
+        size = int(info.SizeOfImage)
+        results.append(
+            {
+                "name": Path(path).name if path else "",
+                "path": path,
+                "base_address": base_address,
+                "size": size,
+                "end_address": base_address + size,
+                "entry_point": int(ctypes.cast(info.EntryPoint, ctypes.c_void_p).value or 0),
+            }
+        )
+    return sorted(results, key=lambda item: int(item["base_address"]))
 
 
 def enum_windows() -> list[tuple[int, str]]:

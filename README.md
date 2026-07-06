@@ -24,6 +24,9 @@ For compiled releases, the clean target is two executables:
 - Can locate the target by window title fragment when the process name is ambiguous
 - Scans readable memory regions for ASCII and UTF-16LE strings
 - Filters hits by mission-related keywords and optional regex patterns
+- Records region provenance, module metadata, and module-relative RVA when available
+- Can capture byte context around each hit for nearby hex/ID analysis
+- Can decode nearby integer candidates from captured byte context
 - Can gate captures until camp mission UI sentinel strings are present in memory
 - Can write only new unique hit text values during a capture session
 - Searches captured payloads from the CLI and the GUI
@@ -115,7 +118,7 @@ python -m cd_sniffer --mode hotkey --hotkey F8 --captures 5
 Recommended camp mission capture:
 
 ```powershell
-python -m cd_sniffer --mode loop --window-title "Crimson Desert" --capture-gate camp-mission --unique-only --summary top-hits --timestamp-output --output logs\camp-mission.jsonl
+python -m cd_sniffer --mode loop --window-title "Crimson Desert" --capture-gate camp-mission --unique-only --context-bytes 64 --decode-context-numbers --summary top-hits --timestamp-output --output logs\camp-mission.jsonl
 ```
 
 Timestamped session logs:
@@ -133,6 +136,9 @@ Useful filters and safety limits:
 - `--max-region-size` skips very large memory regions
 - `--max-regions` stops after a fixed number of matching regions
 - `--max-hits-per-region` keeps huge pages from flooding the log
+- `--context-bytes` stores bytes before and after each hit
+- `--decode-context-numbers` decodes nearby unsigned integer candidates from the byte context
+- `--context-number-radius` controls how far from each hit numeric decoding scans
 - `--capture-gate camp-mission` only captures when camp/dispatch UI sentinel strings are found
 - `--capture-gate custom` uses only your `--gate-keyword` and `--gate-regex` sentinels
 - `--capture-gate-match any|all` controls whether one or every gate sentinel must match
@@ -190,12 +196,14 @@ The most reliable way to get the exact data you want is:
 1. Open only the one game screen you care about, such as a camp dispatch screen or a specific mission detail panel.
 2. Use `--capture-gate camp-mission` so looped captures wait for camp mission UI labels instead of logging unrelated gameplay state.
 3. Add `--unique-only` when looping so repeated strings are not written again and again.
-4. Capture twice: once before the action you care about and once after the action appears.
-5. Use `--summary top-hits` so you can see the dominant strings immediately after each capture.
-6. Keep the capture window small with `--captures 1` or a short hotkey session so the log only contains the relevant state.
-7. Use `--include-regex` to focus on families you already know, and `--exclude-regex` to filter noisy quest or story strings.
-8. Compare the resulting strings against unpacked tables and keep only the entries that consistently show up in the correct camp UI.
-9. If a string appears in multiple game systems, prefer the one that is unique to the camp/dispatch screen over one that also appears in player quests.
+4. Add `--context-bytes 64 --decode-context-numbers` when you need nearby IDs or original byte evidence.
+5. Capture twice: once before the action you care about and once after the action appears.
+6. Use `--summary top-hits` so you can see the dominant strings immediately after each capture.
+7. Keep the capture window small with `--captures 1` or a short hotkey session so the log only contains the relevant state.
+8. Use `--include-regex` to focus on families you already know, and `--exclude-regex` to filter noisy quest or story strings.
+9. Compare the resulting strings against unpacked tables and keep only the entries that consistently show up in the correct camp UI.
+10. Prefer module-relative `module_rva` over absolute `address` whenever it is available; absolute addresses can shift between launches.
+11. If a string appears in multiple game systems, prefer the one that is unique to the camp/dispatch screen over one that also appears in player quests.
 
 In practice, that means the best workflow is to:
 
@@ -230,7 +238,7 @@ The GUI also includes:
 Suggested starting command:
 
 ```powershell
-python -m cd_sniffer --mode hotkey --hotkey F8 --window-title "Crimson Desert" --captures 20 --summary top-hits --timestamp-output --output logs\cdsniffer.jsonl
+python -m cd_sniffer --mode hotkey --hotkey F8 --window-title "Crimson Desert" --captures 20 --context-bytes 64 --decode-context-numbers --summary top-hits --timestamp-output --output logs\cdsniffer.jsonl
 ```
 
 ## Near-Term Roadmap
@@ -238,6 +246,8 @@ python -m cd_sniffer --mode hotkey --hotkey F8 --window-title "Crimson Desert" -
 Good next steps before opening this up more broadly:
 
 - Add exact GUI smoke tests with the `PySide6` extra installed
+- Add the unpacked-file correlator that maps captured strings/bytes to file offsets and DMM patch candidates
+- Add confidence scoring across baseline/target capture sessions
 - Add a build/release script for `cdsniffer.exe` and `cdsniffer-gui.exe`
 - Add a random session token to the localhost GUI IPC channel
 - Split the large GUI module into smaller files once the interface settles

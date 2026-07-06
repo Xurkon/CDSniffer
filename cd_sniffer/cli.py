@@ -75,6 +75,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-region-size", type=int, default=16 * 1024 * 1024, help="Skip regions larger than this many bytes")
     parser.add_argument("--max-regions", type=int, help="Stop after scanning this many matching regions")
     parser.add_argument("--max-hits-per-region", type=int, help="Stop after this many hits in a single region")
+    parser.add_argument("--context-bytes", type=int, default=0, help="Capture this many bytes before and after each matched string")
+    parser.add_argument("--decode-context-numbers", action="store_true", help="Decode nearby integer candidates inside captured byte context")
+    parser.add_argument("--context-number-radius", type=int, default=16, help="Bytes around each hit to inspect for numeric candidates")
     parser.add_argument(
         "--capture-gate",
         choices=CAPTURE_GATE_MODES,
@@ -249,6 +252,10 @@ def main() -> int:
 
     merge_signature_packs(args)
     try:
+        if args.context_bytes < 0:
+            raise ValueError("--context-bytes cannot be negative")
+        if args.context_number_radius < 0:
+            raise ValueError("--context-number-radius cannot be negative")
         validate_regex_patterns(args.include_patterns, "--include-regex")
         validate_regex_patterns(args.exclude_patterns, "--exclude-regex")
         validate_regex_patterns(args.window_filter_patterns, "--window-filter-regex")

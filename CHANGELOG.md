@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added module and region provenance to captures, including module name/path/base, region protection/type, region offsets, and module-relative RVA
+- Added optional hit byte context capture with `--context-bytes`
+- Added optional nearby integer candidate decoding with `--decode-context-numbers` and `--context-number-radius`
 - Added capture gates so CLI and GUI sessions can wait for camp mission UI sentinel strings before writing snapshots
 - Added custom gate keywords/regex, any/all gate matching, and separate gate scan limits
 - Added `--unique-only` plus GUI setting support to skip repeated hit text values during a session

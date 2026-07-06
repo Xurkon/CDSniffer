@@ -261,15 +261,30 @@ def flatten_hits(payload: dict[str, Any]) -> list[dict[str, Any]]:
         "output_path": payload.get("output_path"),
     }
     for region in payload.get("regions", []):
+        module = region.get("module") or {}
         for hit in region.get("hits", []):
             rows.append(
                 {
                     **capture_meta,
                     "base_address": region.get("base_address"),
                     "region_size": region.get("region_size"),
+                    "allocation_base": region.get("allocation_base"),
+                    "state": region.get("state_name") or region.get("state"),
+                    "protection": region.get("protection") or region.get("protect"),
+                    "type": region.get("type_name") or region.get("type"),
+                    "module_name": module.get("name") if isinstance(module, dict) else None,
+                    "module_path": module.get("path") if isinstance(module, dict) else None,
+                    "module_base": module.get("base_address") if isinstance(module, dict) else None,
+                    "module_size": module.get("size") if isinstance(module, dict) else None,
                     "address": hit.get("address"),
+                    "region_offset": hit.get("region_offset"),
+                    "module_rva": hit.get("module_rva"),
                     "encoding": hit.get("encoding"),
+                    "raw_size": hit.get("raw_size"),
                     "text": hit.get("text"),
+                    "context_hex": (hit.get("context") or {}).get("hex") if isinstance(hit.get("context"), dict) else None,
+                    "context_ascii": (hit.get("context") or {}).get("ascii") if isinstance(hit.get("context"), dict) else None,
+                    "context_hit_bytes": (hit.get("context") or {}).get("hit_bytes") if isinstance(hit.get("context"), dict) else None,
                 }
             )
     return rows
@@ -553,9 +568,23 @@ def render_csv_snapshot(payload: dict[str, Any]) -> str:
         "output_path",
         "base_address",
         "region_size",
+        "allocation_base",
+        "state",
+        "protection",
+        "type",
+        "module_name",
+        "module_path",
+        "module_base",
+        "module_size",
         "address",
+        "region_offset",
+        "module_rva",
         "encoding",
+        "raw_size",
         "text",
+        "context_hit_bytes",
+        "context_hex",
+        "context_ascii",
     ]
     writer = csv.DictWriter(buffer, fieldnames=fieldnames)
     writer.writeheader()
@@ -575,16 +604,19 @@ def render_markdown_snapshot(payload: dict[str, Any]) -> str:
         f"- Game Version: `{payload.get('game_version', '')}`",
         f"- Session: `{payload.get('session_name', '')}`",
         "",
-        "| Base Address | Region Size | Address | Encoding | Text |",
-        "| --- | ---: | ---: | --- | --- |",
+        "| Module | RVA | Base Address | Region Size | Address | Encoding | Text |",
+        "| --- | ---: | --- | ---: | --- | --- | --- |",
     ]
     rows = flatten_hits(payload)
     if not rows:
-        lines.append("| - | -: | -: | - | No hits |")
+        lines.append("| - | -: | - | -: | - | - | No hits |")
         return "\n".join(lines) + "\n"
     for row in rows:
+        module = str(row.get("module_name") or "").replace("|", "\\|")
+        module_rva = row.get("module_rva")
+        module_rva_text = f"0x{int(module_rva):X}" if module_rva is not None else "-"
         lines.append(
-            f"| 0x{int(row['base_address']):X} | {int(row['region_size'])} | 0x{int(row['address']):X} | {row['encoding']} | {str(row['text']).replace('|', '\\|')} |"
+            f"| {module or '-'} | {module_rva_text} | 0x{int(row['base_address']):X} | {int(row['region_size'])} | 0x{int(row['address']):X} | {row['encoding']} | {str(row['text']).replace('|', '\\|')} |"
         )
     return "\n".join(lines) + "\n"
 
@@ -709,6 +741,8 @@ def capture_gate_matches(handle: int, args: argparse.Namespace) -> tuple[bool, d
         max_region_size=getattr(args, "max_region_size", 16 * 1024 * 1024),
         max_regions=_positive_int_or_none(getattr(args, "gate_max_regions", 6)),
         max_hits_per_region=_positive_int_or_none(getattr(args, "gate_max_hits_per_region", 1)),
+        context_bytes=0,
+        decode_context_numbers=False,
     )
     texts = [
         str(hit.get("text", ""))
@@ -832,6 +866,9 @@ def capture_once(handle: int, pid: int, args: argparse.Namespace, include_keywor
         max_region_size=args.max_region_size,
         max_regions=args.max_regions,
         max_hits_per_region=args.max_hits_per_region,
+        context_bytes=getattr(args, "context_bytes", 0),
+        decode_context_numbers=getattr(args, "decode_context_numbers", False),
+        context_number_radius=getattr(args, "context_number_radius", 16),
     )
     payload["pid"] = pid
     payload["process"] = args.process
@@ -853,6 +890,9 @@ def capture_once(handle: int, pid: int, args: argparse.Namespace, include_keywor
         "max_region_size": args.max_region_size,
         "max_regions": args.max_regions,
         "max_hits_per_region": args.max_hits_per_region,
+        "context_bytes": getattr(args, "context_bytes", 0),
+        "decode_context_numbers": getattr(args, "decode_context_numbers", False),
+        "context_number_radius": getattr(args, "context_number_radius", 16),
         "capture_gate": getattr(args, "capture_gate", "off"),
         "capture_gate_match": getattr(args, "capture_gate_match", "any"),
         "gate_keywords": getattr(args, "gate_keywords", None),

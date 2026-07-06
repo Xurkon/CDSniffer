@@ -88,6 +88,66 @@
             "type": "integer",
             "minimum": 0
           },
+          "allocation_base": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "allocation_protect": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "allocation_protection": {
+            "type": ["string", "null"]
+          },
+          "state": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "state_name": {
+            "type": ["string", "null"]
+          },
+          "protect": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "protection": {
+            "type": ["string", "null"]
+          },
+          "type": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "type_name": {
+            "type": ["string", "null"]
+          },
+          "module": {
+            "type": ["object", "null"],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "base_address": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end_address": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "entry_point": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
           "hits": {
             "type": "array",
             "items": {
@@ -98,11 +158,92 @@
                   "type": "integer",
                   "minimum": 0
                 },
+                "region_offset": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "module_rva": {
+                  "type": ["integer", "null"],
+                  "minimum": 0
+                },
                 "encoding": {
                   "type": "string"
                 },
                 "text": {
                   "type": "string"
+                },
+                "raw_size": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "context": {
+                  "type": ["object", "null"],
+                  "properties": {
+                    "window_address": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "window_size": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "hit_offset": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "hit_size": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "bytes_before": {
+                      "type": "string"
+                    },
+                    "hit_bytes": {
+                      "type": "string"
+                    },
+                    "bytes_after": {
+                      "type": "string"
+                    },
+                    "hex": {
+                      "type": "string"
+                    },
+                    "ascii": {
+                      "type": "string"
+                    },
+                    "numeric_candidates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["address", "relative_offset", "size", "endian", "value", "hex"],
+                        "properties": {
+                          "address": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "relative_offset": {
+                            "type": "integer"
+                          },
+                          "size": {
+                            "type": "integer",
+                            "enum": [2, 4, 8]
+                          },
+                          "endian": {
+                            "type": "string",
+                            "enum": ["little", "big"]
+                          },
+                          "value": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "hex": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
                 }
               },
               "additionalProperties": false

@@ -19,7 +19,7 @@ from cd_sniffer.core import (
     search_flattened_hits,
     search_payload_values,
 )
-from cd_sniffer.scanner import RegionScan, MemoryHit, extract_strings, filter_hits, summarize_top_hits
+from cd_sniffer.scanner import RegionScan, MemoryHit, build_hit_context, extract_strings, filter_hits, summarize_top_hits
 from cd_sniffer.windows import vk_from_name
 
 
@@ -27,13 +27,15 @@ class ScannerTests(unittest.TestCase):
     def test_extract_strings_finds_ascii_and_utf16le(self):
         blob = b"xxxxMission_DeepForestBeacon_Surroundyyyy" + "Quest_Node_Her_DeepForestBeacon_Normal".encode("utf-16le")
         strings = extract_strings(blob)
-        texts = [text for _, _, text in strings]
+        texts = [text for _, _, text, _ in strings]
         self.assertTrue(any("Mission_DeepForestBeacon_Surround" in text for text in texts))
         self.assertTrue(any("Quest_Node_Her_DeepForestBeacon_Normal" in text for text in texts))
         ascii_hit = next(item for item in strings if item[1] == "ascii")
         utf16_hit = next(item for item in strings if item[1] == "utf16le")
         self.assertEqual(ascii_hit[0], 0)
         self.assertGreater(utf16_hit[0], ascii_hit[0])
+        self.assertEqual(ascii_hit[3], len(ascii_hit[2].encode("ascii")))
+        self.assertEqual(utf16_hit[3], len(utf16_hit[2].encode("utf-16le")))
 
     def test_filter_hits_matches_keywords(self):
         strings = [
@@ -82,6 +84,25 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(top_hits[0]["count"], 2)
         self.assertEqual(top_hits[1]["text"], "Mission_B")
         self.assertEqual(top_hits[1]["first_address"], 0x1000)
+
+    def test_build_hit_context_includes_hex_ascii_and_numbers(self):
+        blob = b"\x00\x00\x39\x30\x00\x00Mission_A\xFF"
+        offset = blob.index(b"Mission_A")
+        context = build_hit_context(
+            blob,
+            0x1000,
+            offset,
+            len(b"Mission_A"),
+            6,
+            decode_numbers=True,
+            number_radius=4,
+        )
+        self.assertIsNotNone(context)
+        assert context is not None
+        self.assertEqual(context["window_address"], 0x1000 + max(0, offset - 6))
+        self.assertEqual(context["hit_bytes"], b"Mission_A".hex(" "))
+        self.assertIn("Mission_A", context["ascii"])
+        self.assertTrue(any(item["value"] == 12345 for item in context["numeric_candidates"]))
 
     def test_timestamped_output_path_adds_stamp(self):
         stamped = timestamped_output_path("logs/cdsniffer.jsonl", "cdsniffer")
