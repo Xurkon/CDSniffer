@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added DMM conflict reports with `--dmm-check` and `--dmm-against` for exact or overlapping byte ranges against existing DMM JSON mods
 - Added opt-in JSON schema validation gates through `--validate-schemas` and `CDSNIFFER_VALIDATE_SCHEMAS=1`
 - Added GUI one-click extraction for selected archive correlation matches, exporting the decoded cache file with archive-relative paths and a provenance sidecar
 - Added `--correlate-repeat` repeat-run confidence rollups so candidates reproduced across multiple target captures get repeat hit counts, ratios, confidence reasons, and report/schema fields

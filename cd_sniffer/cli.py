@@ -50,7 +50,13 @@ from .core import (
     write_rendered_snapshot,
     write_snapshot,
 )
-from .dmm import load_correlation_result, render_dmm_patch_draft
+from .dmm import (
+    build_dmm_conflict_report,
+    load_correlation_result,
+    render_dmm_conflict_csv,
+    render_dmm_conflict_markdown,
+    render_dmm_patch_draft,
+)
 from .ipc import send_gui_command
 from .paz_archive import (
     build_archive_report,
@@ -166,6 +172,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dmm-version", default="0.1.0", help="DMM draft mod version")
     parser.add_argument("--dmm-author", default="CDSniffer", help="DMM draft mod author")
     parser.add_argument("--dmm-patched-placeholder", default="", help="Placeholder hex string for each DMM patched value")
+    parser.add_argument("--dmm-check", help="DMM JSON draft/mod to check for byte-range conflicts")
+    parser.add_argument("--dmm-against", action="append", dest="dmm_against", help="Existing DMM JSON mod to check against; may be repeated")
+    parser.add_argument("--dmm-check-format", choices=["json", "csv", "markdown"], default="json", help="Format used for DMM conflict reports")
+    parser.add_argument("--dmm-check-output", help="Optional file path to write DMM conflict report")
     parser.add_argument("--correlate-archive", help="Capture JSON/JSONL file to correlate against indexed PAMT/PAZ archive entries")
     parser.add_argument("--correlate-archive-index", help="Archive index database to use; defaults to --archive-index-db")
     parser.add_argument("--correlate-archive-cache", default="logs/archive-cache", help="Decoded archive cache directory for archive correlation")
@@ -303,6 +313,36 @@ def main() -> int:
         else:
             print(rendered, end="")
         return 0
+
+    if args.dmm_check:
+        candidate_path = Path(args.dmm_check)
+        against_paths = [Path(item) for item in args.dmm_against or []]
+        if not candidate_path.exists():
+            print(f"DMM candidate file not found: {candidate_path}")
+            return 1
+        for path in against_paths:
+            if not path.exists():
+                print(f"DMM comparison file not found: {path}")
+                return 1
+        try:
+            result = build_dmm_conflict_report(candidate_path, against_paths)
+        except Exception as exc:
+            print(f"DMM conflict check failed: {exc}")
+            return 1
+        if args.dmm_check_format == "csv":
+            rendered = render_dmm_conflict_csv(result)
+        elif args.dmm_check_format == "markdown":
+            rendered = render_dmm_conflict_markdown(result)
+        else:
+            rendered = json.dumps(result, ensure_ascii=False, indent=2)
+        if args.dmm_check_output:
+            out_path = Path(args.dmm_check_output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(rendered, encoding="utf-8")
+            print(json.dumps({"written": str(out_path), "format": args.dmm_check_format, "has_conflicts": result["has_conflicts"]}, ensure_ascii=False, indent=2))
+        else:
+            print(rendered, end="" if rendered.endswith("\n") else "\n")
+        return 2 if result["has_conflicts"] else 0
 
     if args.archive_index:
         if not args.archive_roots:

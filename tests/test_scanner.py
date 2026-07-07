@@ -24,7 +24,13 @@ from cd_sniffer.correlator import (
     render_correlation_csv,
     render_correlation_markdown,
 )
-from cd_sniffer.dmm import build_dmm_patch_draft, render_dmm_patch_draft
+from cd_sniffer.dmm import (
+    build_dmm_conflict_report,
+    build_dmm_patch_draft,
+    render_dmm_conflict_csv,
+    render_dmm_conflict_markdown,
+    render_dmm_patch_draft,
+)
 from cd_sniffer.paz_archive import (
     build_archive_report,
     decode_compression,
@@ -823,6 +829,92 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(first_change["original"], "AABBCCDD")
         self.assertEqual(first_change["patched"], "")
         self.assertIn('"patches"', rendered)
+
+    def test_dmm_conflict_report_detects_overlapping_ranges(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            candidate = root / "candidate.json"
+            existing = root / "existing.json"
+            candidate.write_text(
+                json.dumps(
+                    {
+                        "modinfo": {"title": "Candidate"},
+                        "patches": [
+                            {
+                                "game_file": "tables/test.paseq",
+                                "changes": [{"offset": 10, "original": "AA BB CC DD", "patched": "00"}],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            existing.write_text(
+                json.dumps(
+                    {
+                        "modinfo": {"title": "Existing"},
+                        "patches": [
+                            {
+                                "game_file": "tables/test.paseq",
+                                "changes": [{"offset": 12, "original": "CC DD EE", "patched": "11"}],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_dmm_conflict_report(candidate, [existing])
+            markdown = render_dmm_conflict_markdown(report)
+            csv_text = render_dmm_conflict_csv(report)
+
+        self.assertTrue(report["has_conflicts"])
+        self.assertEqual(report["conflict_count"], 1)
+        self.assertEqual(report["conflicts"][0]["conflict_type"], "overlap")
+        self.assertEqual(report["conflicts"][0]["overlap_start"], 12)
+        self.assertIn("tables/test.paseq", markdown)
+        self.assertIn("against-existing", csv_text)
+
+    def test_dmm_conflict_report_detects_internal_exact_conflicts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            candidate = root / "candidate.json"
+            candidate.write_text(
+                json.dumps(
+                    {
+                        "patches": [
+                            {
+                                "game_file": "tables/test.paseq",
+                                "changes": [
+                                    {"offset": 10, "original": "AA BB"},
+                                    {"offset": 10, "original": "AA BB"},
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_dmm_conflict_report(candidate, [])
+
+        self.assertTrue(report["has_conflicts"])
+        self.assertEqual(report["internal_conflict_count"], 1)
+        self.assertEqual(report["internal_conflicts"][0]["conflict_scope"], "candidate-internal")
+        self.assertEqual(report["internal_conflicts"][0]["conflict_type"], "exact")
+
+    def test_dmm_conflict_report_allows_non_overlapping_ranges(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            candidate = root / "candidate.json"
+            existing = root / "existing.json"
+            candidate.write_text(json.dumps({"patches": [{"game_file": "a.bin", "changes": [{"offset": 0, "original": "AA"}]}]}), encoding="utf-8")
+            existing.write_text(json.dumps({"patches": [{"game_file": "a.bin", "changes": [{"offset": 4, "original": "BB"}]}]}), encoding="utf-8")
+
+            report = build_dmm_conflict_report(candidate, [existing])
+
+        self.assertFalse(report["has_conflicts"])
+        self.assertEqual(report["conflict_count"], 0)
 
     def test_paz_hashlittle_uses_documented_vector(self):
         self.assertEqual(hashlittle(b"rendererconfigurationmaterial.xml", 0x000C5EDE), 0xAF3DCEF3)

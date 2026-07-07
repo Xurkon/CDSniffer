@@ -38,6 +38,7 @@ For compiled releases, the clean target is two executables:
 - Can export the decoded cache file behind a selected archive correlation match from the GUI
 - Provides a dedicated GUI `Archives` tab for building/searching archive indexes and viewing archive correlation matches
 - Can optionally validate generated JSON payloads against bundled schemas before writing reports
+- Can check generated DMM patch drafts against existing DMM mod JSON files for overlapping byte ranges
 - Can gate captures until camp mission UI sentinel strings are present in memory
 - Can write only new unique hit text values during a capture session
 - Searches captured payloads from the CLI and the GUI
@@ -288,6 +289,12 @@ Export a DMM byte-patch draft from a JSON correlation report:
 python -m cd_sniffer --dmm-export logs\archive-correlation.json --dmm-output logs\cdsniffer-dmm-draft.json --dmm-title "My Patch Draft" --dmm-author "YourName"
 ```
 
+Check a generated DMM draft against existing DMM mod JSON files:
+
+```powershell
+python -m cd_sniffer --dmm-check logs\cdsniffer-dmm-draft.json --dmm-against D:\Documents\CrimsonDesertMods\mods\ExistingMod\existing.json --dmm-check-format markdown --dmm-check-output logs\dmm-conflicts.md
+```
+
 How unpacking, decoding, and comparison fit together:
 
 - `--archive-list` only reads PAMT metadata and helps you find candidate archive paths.
@@ -297,6 +304,7 @@ How unpacking, decoding, and comparison fit together:
 - `--correlate-root` scans a whole unpacked/decoded folder tree.
 - `--correlate-file` scans only the selected decoded/unpacked file, which is best when the archive report or manual review already gave you one likely target.
 - `--dmm-export` converts a JSON correlation report into a DMM-style byte-patch draft. It keeps `patched` values blank by default, so every change must be reviewed and completed before use.
+- `--dmm-check` compares a DMM draft/mod JSON against existing DMM mod JSON files and exits with code `2` when conflicts are found.
 
 Choosing the right comparison mode:
 
@@ -324,6 +332,7 @@ Useful correlation options:
 - `--correlate-output` writes the report to a file
 - `--validate-schemas` or `CDSNIFFER_VALIDATE_SCHEMAS=1` validates correlation JSON payloads before output
 - `--dmm-export`, `--dmm-output`, `--dmm-title`, `--dmm-author`, `--dmm-version`, and `--dmm-patched-placeholder` control DMM draft export
+- `--dmm-check`, `--dmm-against`, `--dmm-check-format`, and `--dmm-check-output` control DMM overlap reports
 
 Correlation results include:
 
@@ -467,7 +476,7 @@ Good next steps before opening this up more broadly:
 - [x] Add repeat-run confidence rollups across multiple target captures
 - [x] Add one-click extraction for the archive entry behind a selected archive correlation match
 - [x] Add JSON schema validation gates through a `--validate-schemas` flag and optional environment variable
-- [ ] Add DMM conflict/overlap checking for generated patches against existing DMM mod JSON
+- [x] Add DMM conflict/overlap checking for generated patches against existing DMM mod JSON
 - [ ] Add exact GUI smoke tests with the `PySide6` extra installed
 - [ ] Add sample-driven decoders for any future proprietary PAZ compression payloads that are not raw, zlib, or LZ4
 - [ ] Add a build/release script for `cdsniffer.exe` and `cdsniffer-gui.exe`

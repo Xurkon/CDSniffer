@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import csv
 from collections import defaultdict
 from datetime import datetime, timezone
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +100,173 @@ def build_dmm_patch_draft(
 
 def render_dmm_patch_draft(result: dict[str, Any], **kwargs: Any) -> str:
     return json.dumps(build_dmm_patch_draft(result, **kwargs), ensure_ascii=False, indent=2) + "\n"
+
+
+def load_dmm_patch_json(path: Path) -> dict[str, Any]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"DMM JSON must be an object: {path}")
+    return data
+
+
+def dmm_change_records(data: dict[str, Any], source_path: Path | str) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    source = str(source_path)
+    title = str(data.get("modinfo", {}).get("title") or Path(source).stem)
+    for patch in data.get("patches", []) or []:
+        if not isinstance(patch, dict):
+            continue
+        game_file = str(patch.get("game_file") or patch.get("file") or "").replace("\\", "/")
+        changes = patch.get("changes", []) if isinstance(patch.get("changes"), list) else [patch]
+        for change in changes:
+            if not isinstance(change, dict):
+                continue
+            offset = _int_or_none(change.get("offset"))
+            original = normalize_hex(change.get("original") or change.get("original_bytes"))
+            if not game_file or offset is None or not original:
+                continue
+            length = max(1, len(original) // 2)
+            records.append(
+                {
+                    "source": source,
+                    "title": title,
+                    "game_file": game_file,
+                    "offset": offset,
+                    "offset_hex": f"0x{offset:X}",
+                    "end": offset + length,
+                    "end_hex": f"0x{offset + length:X}",
+                    "length": length,
+                    "original": original,
+                    "patched": normalize_hex(change.get("patched")),
+                    "label": str(change.get("label") or ""),
+                }
+            )
+    return records
+
+
+def build_dmm_conflict_report(candidate_path: Path, against_paths: list[Path]) -> dict[str, Any]:
+    candidate_data = load_dmm_patch_json(candidate_path)
+    candidate_records = dmm_change_records(candidate_data, candidate_path)
+    against_records: list[dict[str, Any]] = []
+    for path in against_paths:
+        against_records.extend(dmm_change_records(load_dmm_patch_json(path), path))
+
+    conflicts: list[dict[str, Any]] = []
+    for candidate in candidate_records:
+        for existing in against_records:
+            conflict = _dmm_overlap(candidate, existing)
+            if conflict:
+                conflicts.append(conflict)
+
+    internal_conflicts: list[dict[str, Any]] = []
+    for index, left in enumerate(candidate_records):
+        for right in candidate_records[index + 1 :]:
+            conflict = _dmm_overlap(left, right)
+            if conflict:
+                conflict["conflict_scope"] = "candidate-internal"
+                internal_conflicts.append(conflict)
+
+    return {
+        "schema": "dmm-conflict-report",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "candidate_path": str(candidate_path),
+        "against_paths": [str(path) for path in against_paths],
+        "candidate_change_count": len(candidate_records),
+        "against_change_count": len(against_records),
+        "conflict_count": len(conflicts),
+        "internal_conflict_count": len(internal_conflicts),
+        "has_conflicts": bool(conflicts or internal_conflicts),
+        "conflicts": conflicts,
+        "internal_conflicts": internal_conflicts,
+    }
+
+
+def render_dmm_conflict_csv(report: dict[str, Any]) -> str:
+    rows = list(report.get("conflicts", [])) + list(report.get("internal_conflicts", []))
+    buffer = StringIO()
+    fieldnames = [
+        "conflict_scope",
+        "conflict_type",
+        "game_file",
+        "overlap_start_hex",
+        "overlap_end_hex",
+        "candidate_source",
+        "candidate_offset_hex",
+        "candidate_length",
+        "existing_source",
+        "existing_offset_hex",
+        "existing_length",
+    ]
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({key: row.get(key, "") for key in fieldnames})
+    return buffer.getvalue()
+
+
+def render_dmm_conflict_markdown(report: dict[str, Any]) -> str:
+    rows = list(report.get("conflicts", [])) + list(report.get("internal_conflicts", []))
+    lines = [
+        "# CDSniffer DMM Conflict Report",
+        "",
+        f"- Candidate: `{report.get('candidate_path', '')}`",
+        f"- Existing mods checked: `{len(report.get('against_paths', []))}`",
+        f"- Candidate changes: `{report.get('candidate_change_count', 0)}`",
+        f"- Existing changes: `{report.get('against_change_count', 0)}`",
+        f"- Conflicts: `{report.get('conflict_count', 0)}`",
+        f"- Internal conflicts: `{report.get('internal_conflict_count', 0)}`",
+        "",
+        "| Scope | Type | File | Overlap | Candidate | Existing |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    if not rows:
+        lines.append("| - | - | - | - | No conflicts found | - |")
+        return "\n".join(lines) + "\n"
+    for row in rows:
+        game_file = str(row.get("game_file", "")).replace("|", "\\|")
+        overlap = f"`{row.get('overlap_start_hex')}`-`{row.get('overlap_end_hex')}`"
+        candidate = f"`{row.get('candidate_source')}` @ `{row.get('candidate_offset_hex')}` ({row.get('candidate_length')} bytes)"
+        existing = f"`{row.get('existing_source')}` @ `{row.get('existing_offset_hex')}` ({row.get('existing_length')} bytes)"
+        lines.append(f"| {row.get('conflict_scope', '')} | {row.get('conflict_type', '')} | {game_file} | {overlap} | {candidate} | {existing} |")
+    return "\n".join(lines) + "\n"
+
+
+def _dmm_overlap(candidate: dict[str, Any], existing: dict[str, Any]) -> dict[str, Any] | None:
+    if candidate["game_file"].lower() != existing["game_file"].lower():
+        return None
+    start = max(int(candidate["offset"]), int(existing["offset"]))
+    end = min(int(candidate["end"]), int(existing["end"]))
+    if start >= end:
+        return None
+    conflict_type = "exact" if candidate["offset"] == existing["offset"] and candidate["end"] == existing["end"] else "overlap"
+    return {
+        "conflict_scope": "against-existing",
+        "conflict_type": conflict_type,
+        "game_file": candidate["game_file"],
+        "overlap_start": start,
+        "overlap_start_hex": f"0x{start:X}",
+        "overlap_end": end,
+        "overlap_end_hex": f"0x{end:X}",
+        "candidate_source": candidate["source"],
+        "candidate_title": candidate["title"],
+        "candidate_offset": candidate["offset"],
+        "candidate_offset_hex": candidate["offset_hex"],
+        "candidate_length": candidate["length"],
+        "candidate_original": candidate["original"],
+        "existing_source": existing["source"],
+        "existing_title": existing["title"],
+        "existing_offset": existing["offset"],
+        "existing_offset_hex": existing["offset_hex"],
+        "existing_length": existing["length"],
+        "existing_original": existing["original"],
+    }
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def load_correlation_result(path: Path) -> dict[str, Any]:
