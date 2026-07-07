@@ -310,6 +310,66 @@ def set_widget_tips(items: list[tuple[Any, str]]) -> None:
         widget.setStatusTip(tip)
 
 
+class HotkeyLineEdit(QLineEdit):
+    def __init__(self, text: str = "") -> None:
+        super().__init__(text)
+        self.setReadOnly(True)
+        self.setClearButtonEnabled(True)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setPlaceholderText("Click and press a key")
+
+    def keyPressEvent(self, event) -> None:  # noqa: ANN001 - Qt event type varies by binding
+        key = int(event.key())
+        if key in {Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta}:
+            event.accept()
+            return
+        if key in {Qt.Key_Backspace, Qt.Key_Delete, Qt.Key_Escape}:
+            self.clear()
+            event.accept()
+            return
+
+        hotkey_name = self._key_name_from_event(event)
+        if hotkey_name:
+            self.setText(hotkey_name)
+            self.selectAll()
+            event.accept()
+            return
+
+        super().keyPressEvent(event)
+
+    @staticmethod
+    def _key_name_from_event(event) -> str | None:  # noqa: ANN001 - Qt event type varies by binding
+        key = int(event.key())
+        if Qt.Key_F1 <= key <= Qt.Key_F35:
+            return f"F{key - Qt.Key_F1 + 1}"
+        if Qt.Key_0 <= key <= Qt.Key_9:
+            return chr(key)
+        if Qt.Key_A <= key <= Qt.Key_Z:
+            return chr(key)
+
+        specials = {
+            Qt.Key_Space: "SPACE",
+            Qt.Key_Tab: "TAB",
+            Qt.Key_Return: "ENTER",
+            Qt.Key_Enter: "ENTER",
+            Qt.Key_Left: "LEFT",
+            Qt.Key_Right: "RIGHT",
+            Qt.Key_Up: "UP",
+            Qt.Key_Down: "DOWN",
+            Qt.Key_Home: "HOME",
+            Qt.Key_End: "END",
+            Qt.Key_PageUp: "PAGEUP",
+            Qt.Key_PageDown: "PAGEDOWN",
+            Qt.Key_Insert: "INSERT",
+            Qt.Key_Delete: "DELETE",
+            Qt.Key_Escape: "ESCAPE",
+            Qt.Key_Pause: "PAUSE",
+            Qt.Key_CapsLock: "CAPSLOCK",
+            Qt.Key_Backspace: "BACKSPACE",
+        }
+        return specials.get(key)
+
+
 class SettingsDialog(QDialog):
     def __init__(self, parent: QWidget | None, settings: dict[str, Any]) -> None:
         super().__init__(parent)
@@ -346,7 +406,7 @@ class SettingsDialog(QDialog):
         self.mode = QComboBox()
         self.mode.addItems(["once", "loop", "hotkey"])
         self.mode.setCurrentText(str(self._settings.get("mode", "loop")))
-        self.hotkey = QLineEdit(str(self._settings.get("hotkey", "F8")))
+        self.hotkey = HotkeyLineEdit(str(self._settings.get("hotkey", "F8")))
         self.interval = QDoubleSpinBox()
         self.interval.setRange(0.05, 3600.0)
         self.interval.setDecimals(2)
@@ -525,7 +585,7 @@ class SettingsDialog(QDialog):
         set_widget_tips(
             [
                 (self.mode, "Choose once for one snapshot, loop for repeated captures, or hotkey to capture only when the configured key is pressed."),
-                (self.hotkey, "Key used in hotkey mode. F8 is the default because it is unlikely to conflict with the game UI."),
+                (self.hotkey, "Click the field and press a key. F8 is the default because it is unlikely to conflict with the game UI."),
                 (self.interval, "Seconds between loop captures and hotkey polling checks."),
                 (self.captures, "Maximum snapshots before stopping. Leave at Unlimited for manual stop or long-running sessions."),
                 (self.output, "Capture log path. JSONL is best for repeated captures because each snapshot is appended as one line."),
@@ -1158,7 +1218,7 @@ class MainWindow(QMainWindow):
         self.window_filter_edit.setPlaceholderText("Regex filter for windows")
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["once", "loop", "hotkey"])
-        self.hotkey_edit = QLineEdit("F8")
+        self.hotkey_edit = HotkeyLineEdit("F8")
         self.interval_spin = QDoubleSpinBox()
         self.interval_spin.setRange(0.05, 3600.0)
         self.interval_spin.setDecimals(2)
@@ -1271,6 +1331,7 @@ class MainWindow(QMainWindow):
         self.exclude_regex_edit.setPlaceholderText("One regex per line")
         self.notes_edit = QPlainTextEdit()
         self.notes_edit.setPlaceholderText("Optional session notes")
+        self.hotkey_edit.textChanged.connect(self.refresh_capture_summary)
         self._apply_default_settings()
 
     def apply_main_tooltips(self) -> None:
@@ -1288,6 +1349,7 @@ class MainWindow(QMainWindow):
             "window_title_edit": "Optional window title fragment used if process lookup needs help.",
             "window_filter_edit": "Regex window-title filter used to narrow ambiguous target windows.",
             "pid_edit": "Optional exact process ID. Leave blank to auto-detect Crimson Desert.",
+            "hotkey_edit": "Click the field and press a single supported key like F8, G, or PageDown.",
             "live_search_edit": "Search within the current real-time capture without changing the saved capture payload.",
             "live_search_history_combo": "Recent live searches for quick reuse.",
             "live_search_regex_check": "Treat the live search query as a regular expression.",

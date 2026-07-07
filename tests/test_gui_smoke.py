@@ -8,13 +8,16 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 try:
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
     from PySide6.QtWidgets import QApplication
 
-    from cd_sniffer.gui import MainWindow, SettingsDialog
+    from cd_sniffer.gui import HotkeyLineEdit, MainWindow, SettingsDialog
 except Exception as exc:  # pragma: no cover - depends on optional GUI extra
     QApplication = None  # type: ignore[assignment]
     MainWindow = None  # type: ignore[assignment]
     SettingsDialog = None  # type: ignore[assignment]
+    HotkeyLineEdit = None  # type: ignore[assignment]
     GUI_IMPORT_ERROR = exc
 else:
     GUI_IMPORT_ERROR = None
@@ -51,6 +54,18 @@ class GuiSmokeTests(unittest.TestCase):
         finally:
             dialog.close()
             window.close()
+            app.processEvents()
+
+    def test_hotkey_line_edit_captures_and_clears_keys(self):
+        app = QApplication.instance() or QApplication([])
+        widget = HotkeyLineEdit("F8")
+        try:
+            widget.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_G, Qt.NoModifier, "g"))
+            self.assertEqual(widget.text(), "G")
+            widget.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_Backspace, Qt.NoModifier))
+            self.assertEqual(widget.text(), "")
+        finally:
+            widget.close()
             app.processEvents()
 
 

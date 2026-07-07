@@ -123,7 +123,7 @@ Use the GUI when you want a guided workflow, live capture search, archive compar
 3. Check the `Capture` tab status. It should show `Game Detected` in green when the game is found, or `Game not detected` if CDSniffer cannot see it yet.
 4. Click `Refresh Window List` if the game was started after the GUI, or `Pick Window` only when auto-detection is ambiguous.
 5. Click `Settings`, then choose the capture behavior you want.
-6. For camp mission research, start with `Mode: hotkey`, `Hotkey: F8`, `Capture Gate: camp-mission`, `Unique only: on`, `Context Bytes: 64`, and `Decode context numbers: on`.
+6. For camp mission research, start with `Mode: hotkey`, click the `Hotkey` field and press a key like `F8`, then set `Capture Gate: camp-mission`, `Unique only: on`, `Context Bytes: 64`, and `Decode context numbers: on`.
 7. Open the game screen you want to study, press the hotkey, and inspect the `Real-Time` tab.
 8. Use the `Real-Time` search box to search the current capture without changing the saved payload.
 9. Use the `Search` tab to search older capture logs across a folder.
