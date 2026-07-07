@@ -34,6 +34,7 @@ For compiled releases, the clean target is two executables:
 - Can parse PAMT indexes and extract/validate/decode PAZ archive entries without launching an external unpacker
 - Can build a reusable SQLite PAMT/PAZ archive index for fast repeated lookups after a game patch
 - Can correlate captures directly against indexed archive entries with a lazy decoded-entry cache
+- Provides a dedicated GUI `Archives` tab for building/searching archive indexes and viewing archive correlation matches
 - Can gate captures until camp mission UI sentinel strings are present in memory
 - Can write only new unique hit text values during a capture session
 - Searches captured payloads from the CLI and the GUI
@@ -315,6 +316,18 @@ Search the live GUI capture:
 - Use the import/export buttons if you want to share search history with another machine
 - Use the `Search` tab to search a folder of capture logs and filter the results table live
 
+Use the GUI `Archives` tab:
+
+- Set `Archive root` to the Crimson Desert install folder or a specific `.pamt` file
+- Set `Index DB` to the SQLite file you want to create or reuse
+- Use `Index globs` to keep the index focused, such as `*.paseq`, `*.json`, or `*.xml`
+- Click `Build / Rebuild Index` after a game update or when changing indexed file families
+- Use `Search Indexed Archive Entries` to quickly inspect archive paths before decoding anything
+- Set `Capture` to a CDSniffer JSON/JSONL capture and `Cache dir` to a decoded cache folder
+- Use archive correlation globs and path terms to narrow candidates before clicking `Run Archive Correlation`
+- Inspect the `Correlation Matches` table for confidence, decoded offset, evidence value, decoder, original bytes, cache path, and confidence reasons
+- Export the latest index summary or correlation report from the tab when sharing results
+
 ## Suggested workflow
 
 1. Start the game
@@ -364,6 +377,7 @@ The GUI is split into these primary tabs:
 - `Capture` for target selection, verbosity, filters, export settings, and session control
 - `Real-Time` for the live top-hit table and the latest snapshot payload
 - `Search` for folder-wide capture search with a filterable results table
+- `Archives` for PAMT/PAZ index building, index search, archive correlation, and report export
 - `Terminal` for CLI-style commands inside the app
 - `Logs` for the rolling session log
 - `Presets` for reusable capture settings
@@ -376,6 +390,7 @@ The GUI also includes:
 - IPC handling so the CLI can start, stop, show, hide, and retarget the GUI
 - A read-only capture dashboard so the main tab stays clean
 - A live search box on the `Real-Time` tab that filters the current capture in place
+- A dedicated archive workflow tab that surfaces decoded-offset correlation without requiring terminal commands
 
 Suggested starting command:
 
@@ -388,7 +403,6 @@ python -m cd_sniffer --mode hotkey --hotkey F8 --window-title "Crimson Desert" -
 Good next steps before opening this up more broadly:
 
 - Add exact GUI smoke tests with the `PySide6` extra installed
-- Add a dedicated GUI tab for archive index search and live archive-correlation results
 - Add DMM-specific patch emitters on top of the generic correlation patch skeletons
 - Expand format analyzers with deeper PASEQ, quest/mission table, hash, and typed record parsers
 - Add sample-driven decoders for any future proprietary PAZ compression payloads that are not raw, zlib, or LZ4

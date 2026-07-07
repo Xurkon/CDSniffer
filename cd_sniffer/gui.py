@@ -5,8 +5,11 @@ import html
 import json
 import importlib.resources as resources
 import queue
+import re
 import shlex
 import threading
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -15,7 +18,9 @@ from .archive_index import (
     correlate_capture_to_archive,
     render_archive_correlation_csv,
     render_archive_correlation_markdown,
+    render_archive_index_csv,
     render_archive_index_markdown,
+    select_archive_entries,
 )
 from .correlator import correlate_capture_to_files, render_correlation_csv, render_correlation_markdown
 
@@ -829,6 +834,74 @@ class CaptureWorker(QObject):
             self.finished.emit()
 
 
+class ArchiveTaskWorker(QObject):
+    result = Signal(str, dict)
+    status = Signal(str)
+    error = Signal(str)
+    finished = Signal()
+
+    def __init__(self, task: str, params: dict[str, Any]) -> None:
+        super().__init__()
+        self.task = task
+        self.params = params
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            if self.task == "build-index":
+                roots = [Path(item) for item in self.params.get("roots", [])]
+                self.status.emit(f"Building archive index from {len(roots)} root(s)...")
+                result = build_archive_index(
+                    Path(self.params["db_path"]),
+                    roots,
+                    paz_dir=Path(self.params["paz_dir"]) if self.params.get("paz_dir") else None,
+                    patterns=self.params.get("patterns") or None,
+                    limit=self.params.get("limit"),
+                )
+                self.result.emit(self.task, result)
+                return
+            if self.task == "search-index":
+                self.status.emit("Searching archive index...")
+                entries = select_archive_entries(
+                    Path(self.params["db_path"]),
+                    patterns=self.params.get("patterns") or None,
+                    path_terms=self.params.get("path_terms") or None,
+                    limit=self.params.get("limit"),
+                )
+                result = {
+                    "db_path": self.params["db_path"],
+                    "patterns": self.params.get("patterns") or ["*"],
+                    "path_terms": self.params.get("path_terms") or [],
+                    "entry_count": len(entries),
+                    "entries": [entry.to_dict() for entry in entries],
+                }
+                self.result.emit(self.task, result)
+                return
+            if self.task == "correlate-archive":
+                self.status.emit("Correlating capture against archive index...")
+                result = correlate_capture_to_archive(
+                    Path(self.params["capture_path"]),
+                    Path(self.params["db_path"]),
+                    Path(self.params["cache_dir"]),
+                    patterns=self.params.get("patterns") or None,
+                    path_terms=self.params.get("path_terms") or None,
+                    max_entries=int(self.params["max_entries"]),
+                    max_matches_per_evidence=int(self.params["max_matches_per_evidence"]),
+                    max_total_matches=int(self.params["max_matches"]),
+                    include_numeric=bool(self.params["include_numeric"]),
+                    context_bytes=int(self.params["context_bytes"]),
+                    include_format_hints=bool(self.params["include_format_hints"]),
+                    decrypt_xml=bool(self.params["decrypt_xml"]),
+                )
+                self.result.emit(self.task, result)
+                return
+            raise ValueError(f"Unknown archive task: {self.task}")
+        except Exception as exc:
+            self.error.emit(str(exc))
+        finally:
+            self.finished.emit()
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -837,6 +910,8 @@ class MainWindow(QMainWindow):
         self.resize(1480, 920)
         self.worker_thread: QThread | None = None
         self.worker: CaptureWorker | None = None
+        self.archive_task_thread: QThread | None = None
+        self.archive_task_worker: ArchiveTaskWorker | None = None
         self.last_payload: dict[str, Any] | None = None
         self.last_capture_at: datetime | None = None
         self.last_capture_duration_ms: float | None = None
@@ -870,12 +945,14 @@ class MainWindow(QMainWindow):
         self.capture_tab = QWidget()
         self.live_tab = QWidget()
         self.search_tab = QWidget()
+        self.archives_tab = QWidget()
         self.terminal_tab = QWidget()
         self.log_tab = QWidget()
         self.presets_tab = QWidget()
         self.tabs.addTab(self.capture_tab, "Capture")
         self.tabs.addTab(self.live_tab, "Real-Time")
         self.tabs.addTab(self.search_tab, "Search")
+        self.tabs.addTab(self.archives_tab, "Archives")
         self.tabs.addTab(self.terminal_tab, "Terminal")
         self.tabs.addTab(self.log_tab, "Logs")
         self.tabs.addTab(self.presets_tab, "Presets")
@@ -883,6 +960,7 @@ class MainWindow(QMainWindow):
         self.build_capture_tab()
         self.build_live_tab()
         self.build_search_tab()
+        self.build_archives_tab()
         self.load_search_state()
         self.build_terminal_tab()
         self.build_log_tab()
@@ -1744,6 +1822,478 @@ class MainWindow(QMainWindow):
         self.folder_search_results_table.setAlternatingRowColors(True)
         layout.addWidget(self.folder_search_results_table, 1)
 
+    def build_archives_tab(self) -> None:
+        layout = QVBoxLayout(self.archives_tab)
+        controls = QGroupBox("Archive Index")
+        controls_layout = QGridLayout(controls)
+        self.archive_root_edit = QLineEdit(r"C:\Program Files (x86)\Steam\steamapps\common\Crimson Desert")
+        self.archive_index_db_edit = QLineEdit(str(Path("logs") / "cdsniffer-archive-index.sqlite"))
+        self.archive_paz_dir_edit = QLineEdit()
+        self.archive_paz_dir_edit.setPlaceholderText("Optional PAZ directory for standalone .pamt")
+        self.archive_patterns_edit = QPlainTextEdit("*.paseq\n*.json\n*.xml")
+        self.archive_patterns_edit.setMaximumHeight(92)
+        self.archive_index_limit_spin = QSpinBox()
+        self.archive_index_limit_spin.setRange(0, 10_000_000)
+        self.archive_index_limit_spin.setSpecialValueText("No limit")
+        self.archive_index_limit_spin.setValue(0)
+        self.archive_browse_root_button = QPushButton("Browse Root")
+        self.archive_browse_root_button.clicked.connect(self.browse_archive_root)
+        self.archive_browse_index_button = QPushButton("Browse Index DB")
+        self.archive_browse_index_button.clicked.connect(self.browse_archive_index_db)
+        self.archive_build_index_button = QPushButton("Build / Rebuild Index")
+        self.archive_build_index_button.clicked.connect(self.run_archive_index_build)
+        self.archive_export_index_button = QPushButton("Export Index Summary")
+        self.archive_export_index_button.clicked.connect(self.export_archive_index_report)
+        controls_layout.addWidget(QLabel("Archive root"), 0, 0)
+        controls_layout.addWidget(self.archive_root_edit, 0, 1, 1, 4)
+        controls_layout.addWidget(self.archive_browse_root_button, 0, 5)
+        controls_layout.addWidget(QLabel("Index DB"), 1, 0)
+        controls_layout.addWidget(self.archive_index_db_edit, 1, 1, 1, 4)
+        controls_layout.addWidget(self.archive_browse_index_button, 1, 5)
+        controls_layout.addWidget(QLabel("PAZ dir"), 2, 0)
+        controls_layout.addWidget(self.archive_paz_dir_edit, 2, 1, 1, 5)
+        controls_layout.addWidget(QLabel("Index globs"), 3, 0)
+        controls_layout.addWidget(self.archive_patterns_edit, 3, 1, 1, 3)
+        controls_layout.addWidget(QLabel("Limit"), 3, 4)
+        controls_layout.addWidget(self.archive_index_limit_spin, 3, 5)
+        controls_layout.addWidget(self.archive_build_index_button, 4, 0, 1, 2)
+        controls_layout.addWidget(self.archive_export_index_button, 4, 2, 1, 2)
+        layout.addWidget(controls)
+
+        search_box = QGroupBox("Search Indexed Archive Entries")
+        search_layout = QGridLayout(search_box)
+        self.archive_search_terms_edit = QLineEdit()
+        self.archive_search_terms_edit.setPlaceholderText("Path terms, comma separated, e.g. mission, camp, quest")
+        self.archive_search_globs_edit = QLineEdit("*.paseq")
+        self.archive_search_globs_edit.setPlaceholderText("Entry globs, comma separated")
+        self.archive_search_limit_spin = QSpinBox()
+        self.archive_search_limit_spin.setRange(1, 100_000)
+        self.archive_search_limit_spin.setValue(500)
+        self.archive_search_filter_edit = QLineEdit()
+        self.archive_search_filter_edit.setPlaceholderText("Filter index result rows...")
+        self.archive_search_filter_edit.textChanged.connect(self.filter_archive_index_rows)
+        self.archive_search_button = QPushButton("Search Index")
+        self.archive_search_button.clicked.connect(self.run_archive_index_search)
+        search_layout.addWidget(QLabel("Path terms"), 0, 0)
+        search_layout.addWidget(self.archive_search_terms_edit, 0, 1, 1, 3)
+        search_layout.addWidget(QLabel("Globs"), 1, 0)
+        search_layout.addWidget(self.archive_search_globs_edit, 1, 1)
+        search_layout.addWidget(QLabel("Limit"), 1, 2)
+        search_layout.addWidget(self.archive_search_limit_spin, 1, 3)
+        search_layout.addWidget(self.archive_search_button, 2, 0)
+        search_layout.addWidget(QLabel("Table filter"), 2, 1)
+        search_layout.addWidget(self.archive_search_filter_edit, 2, 2, 1, 2)
+        layout.addWidget(search_box)
+
+        correlate_box = QGroupBox("Correlate Capture Against Archive Index")
+        correlate_layout = QGridLayout(correlate_box)
+        self.archive_capture_edit = QLineEdit(str(Path("logs") / "camp-mission.jsonl"))
+        self.archive_cache_dir_edit = QLineEdit(str(Path("logs") / "archive-cache"))
+        self.archive_correlation_globs_edit = QLineEdit("*.paseq, *.json, *.xml")
+        self.archive_correlation_terms_edit = QLineEdit()
+        self.archive_correlation_terms_edit.setPlaceholderText("Optional archive path terms")
+        self.archive_correlation_max_entries_spin = QSpinBox()
+        self.archive_correlation_max_entries_spin.setRange(1, 100_000)
+        self.archive_correlation_max_entries_spin.setValue(2000)
+        self.archive_correlation_max_matches_spin = QSpinBox()
+        self.archive_correlation_max_matches_spin.setRange(1, 100_000)
+        self.archive_correlation_max_matches_spin.setValue(500)
+        self.archive_correlation_max_per_evidence_spin = QSpinBox()
+        self.archive_correlation_max_per_evidence_spin.setRange(1, 10_000)
+        self.archive_correlation_max_per_evidence_spin.setValue(20)
+        self.archive_correlation_context_spin = QSpinBox()
+        self.archive_correlation_context_spin.setRange(0, 4096)
+        self.archive_correlation_context_spin.setValue(16)
+        self.archive_correlation_numeric_check = QCheckBox("Numeric evidence")
+        self.archive_correlation_numeric_check.setChecked(True)
+        self.archive_correlation_hints_check = QCheckBox("Format hints")
+        self.archive_correlation_hints_check.setChecked(True)
+        self.archive_correlation_decrypt_check = QCheckBox("Decrypt XML")
+        self.archive_correlation_decrypt_check.setChecked(True)
+        self.archive_correlation_format_combo = QComboBox()
+        self.archive_correlation_format_combo.addItems(["markdown", "json", "csv"])
+        self.archive_browse_capture_button = QPushButton("Browse Capture")
+        self.archive_browse_capture_button.clicked.connect(self.browse_archive_capture)
+        self.archive_browse_cache_button = QPushButton("Browse Cache")
+        self.archive_browse_cache_button.clicked.connect(self.browse_archive_cache)
+        self.archive_correlate_button = QPushButton("Run Archive Correlation")
+        self.archive_correlate_button.clicked.connect(self.run_archive_correlation)
+        self.archive_export_correlation_button = QPushButton("Export Correlation")
+        self.archive_export_correlation_button.clicked.connect(self.export_archive_correlation)
+        self.archive_correlation_filter_edit = QLineEdit()
+        self.archive_correlation_filter_edit.setPlaceholderText("Filter correlation result rows...")
+        self.archive_correlation_filter_edit.textChanged.connect(self.filter_archive_correlation_rows)
+        correlate_layout.addWidget(QLabel("Capture"), 0, 0)
+        correlate_layout.addWidget(self.archive_capture_edit, 0, 1, 1, 4)
+        correlate_layout.addWidget(self.archive_browse_capture_button, 0, 5)
+        correlate_layout.addWidget(QLabel("Cache dir"), 1, 0)
+        correlate_layout.addWidget(self.archive_cache_dir_edit, 1, 1, 1, 4)
+        correlate_layout.addWidget(self.archive_browse_cache_button, 1, 5)
+        correlate_layout.addWidget(QLabel("Globs"), 2, 0)
+        correlate_layout.addWidget(self.archive_correlation_globs_edit, 2, 1, 1, 2)
+        correlate_layout.addWidget(QLabel("Path terms"), 2, 3)
+        correlate_layout.addWidget(self.archive_correlation_terms_edit, 2, 4, 1, 2)
+        correlate_layout.addWidget(QLabel("Max entries"), 3, 0)
+        correlate_layout.addWidget(self.archive_correlation_max_entries_spin, 3, 1)
+        correlate_layout.addWidget(QLabel("Max matches"), 3, 2)
+        correlate_layout.addWidget(self.archive_correlation_max_matches_spin, 3, 3)
+        correlate_layout.addWidget(QLabel("Per evidence"), 3, 4)
+        correlate_layout.addWidget(self.archive_correlation_max_per_evidence_spin, 3, 5)
+        correlate_layout.addWidget(QLabel("Context bytes"), 4, 0)
+        correlate_layout.addWidget(self.archive_correlation_context_spin, 4, 1)
+        correlate_layout.addWidget(self.archive_correlation_numeric_check, 4, 2)
+        correlate_layout.addWidget(self.archive_correlation_hints_check, 4, 3)
+        correlate_layout.addWidget(self.archive_correlation_decrypt_check, 4, 4)
+        correlate_layout.addWidget(self.archive_correlation_format_combo, 4, 5)
+        correlate_layout.addWidget(self.archive_correlate_button, 5, 0, 1, 2)
+        correlate_layout.addWidget(self.archive_export_correlation_button, 5, 2, 1, 2)
+        correlate_layout.addWidget(QLabel("Table filter"), 6, 0)
+        correlate_layout.addWidget(self.archive_correlation_filter_edit, 6, 1, 1, 5)
+        layout.addWidget(correlate_box)
+
+        self.archive_summary_label = QLabel("No archive operation run yet.")
+        self.archive_summary_label.setWordWrap(True)
+        layout.addWidget(self.archive_summary_label)
+
+        splitter = QSplitter(Qt.Vertical)
+        tables_splitter = QSplitter(Qt.Horizontal)
+        index_panel = QWidget()
+        index_layout = QVBoxLayout(index_panel)
+        self.archive_index_table = QTableWidget(0, 8)
+        self.archive_index_table.setHorizontalHeaderLabels(["Path", "Ext", "Compression", "PAZ", "Offset", "Stored", "Original", "Flags"])
+        self.archive_index_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.archive_index_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.archive_index_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.archive_index_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.archive_index_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.archive_index_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        self.archive_index_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        self.archive_index_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeToContents)
+        self.archive_index_table.setAlternatingRowColors(True)
+        index_layout.addWidget(QLabel("Indexed Entries"))
+        index_layout.addWidget(self.archive_index_table)
+        tables_splitter.addWidget(index_panel)
+
+        correlation_panel = QWidget()
+        correlation_layout = QVBoxLayout(correlation_panel)
+        self.archive_correlation_table = QTableWidget(0, 10)
+        self.archive_correlation_table.setHorizontalHeaderLabels(
+            ["Confidence", "Archive Path", "Offset", "Type", "Evidence", "Count", "Decoder", "Original Bytes", "Cache", "Reasons"]
+        )
+        self.archive_correlation_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.archive_correlation_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.archive_correlation_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.archive_correlation_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.archive_correlation_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        self.archive_correlation_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        self.archive_correlation_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        self.archive_correlation_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.Stretch)
+        self.archive_correlation_table.horizontalHeader().setSectionResizeMode(8, QHeaderView.Stretch)
+        self.archive_correlation_table.horizontalHeader().setSectionResizeMode(9, QHeaderView.Stretch)
+        self.archive_correlation_table.setAlternatingRowColors(True)
+        correlation_layout.addWidget(QLabel("Correlation Matches"))
+        correlation_layout.addWidget(self.archive_correlation_table)
+        tables_splitter.addWidget(correlation_panel)
+        tables_splitter.setStretchFactor(0, 2)
+        tables_splitter.setStretchFactor(1, 3)
+        splitter.addWidget(tables_splitter)
+
+        self.archive_report_view = QPlainTextEdit()
+        self.archive_report_view.setReadOnly(True)
+        self.archive_report_view.setFont(QFont("Cascadia Mono", 10))
+        splitter.addWidget(self.archive_report_view)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 1)
+        layout.addWidget(splitter, 1)
+
+        self.last_archive_index_report: dict[str, Any] | None = None
+        self.last_archive_index_search: dict[str, Any] | None = None
+        self.last_archive_correlation: dict[str, Any] | None = None
+
+    def archive_patterns(self, text: str) -> list[str]:
+        return split_values(text)
+
+    def archive_terms(self, text: str) -> list[str]:
+        return split_values(text)
+
+    def browse_archive_root(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "Select Archive Root", self.archive_root_edit.text())
+        if path:
+            self.archive_root_edit.setText(path)
+
+    def browse_archive_index_db(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(self, "Select Archive Index DB", self.archive_index_db_edit.text(), "SQLite DB (*.sqlite *.db);;All Files (*.*)")
+        if path:
+            self.archive_index_db_edit.setText(path)
+
+    def browse_archive_capture(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Select Capture File", self.archive_capture_edit.text(), "Capture Files (*.jsonl *.json);;All Files (*.*)")
+        if path:
+            self.archive_capture_edit.setText(path)
+
+    def browse_archive_cache(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "Select Archive Cache Directory", self.archive_cache_dir_edit.text())
+        if path:
+            self.archive_cache_dir_edit.setText(path)
+
+    def set_archive_busy(self, busy: bool) -> None:
+        for button_name in [
+            "archive_build_index_button",
+            "archive_search_button",
+            "archive_correlate_button",
+            "archive_export_index_button",
+            "archive_export_correlation_button",
+        ]:
+            button = getattr(self, button_name, None)
+            if button is not None:
+                button.setEnabled(not busy)
+        if busy:
+            self.archive_summary_label.setText("Archive task running...")
+
+    def start_archive_task(self, task: str, params: dict[str, Any]) -> None:
+        if self.archive_task_worker is not None:
+            QMessageBox.information(self, "Archive Task Running", "Wait for the current archive task to finish first.")
+            return
+        self.set_archive_busy(True)
+        self.archive_task_thread = QThread(self)
+        self.archive_task_worker = ArchiveTaskWorker(task, params)
+        self.archive_task_worker.moveToThread(self.archive_task_thread)
+        self.archive_task_thread.started.connect(self.archive_task_worker.run)
+        self.archive_task_worker.result.connect(self.on_archive_task_result)
+        self.archive_task_worker.status.connect(self.on_archive_task_status)
+        self.archive_task_worker.error.connect(self.on_archive_task_error)
+        self.archive_task_worker.finished.connect(self.on_archive_task_finished)
+        self.archive_task_worker.finished.connect(self.archive_task_thread.quit)
+        self.archive_task_worker.finished.connect(self.archive_task_worker.deleteLater)
+        self.archive_task_thread.finished.connect(self.archive_task_thread.deleteLater)
+        self.archive_task_thread.start()
+
+    def run_archive_index_build(self) -> None:
+        root = Path(self.archive_root_edit.text().strip())
+        db_path = Path(self.archive_index_db_edit.text().strip())
+        if not root.exists():
+            QMessageBox.warning(self, "Missing Archive Root", f"Archive root not found: {root}")
+            return
+        if not str(db_path).strip():
+            QMessageBox.warning(self, "Missing Index DB", "Choose an index database path.")
+            return
+        paz_dir_text = self.archive_paz_dir_edit.text().strip()
+        if paz_dir_text and not Path(paz_dir_text).exists():
+            QMessageBox.warning(self, "Missing PAZ Directory", f"PAZ directory not found: {paz_dir_text}")
+            return
+        limit = int(self.archive_index_limit_spin.value()) or None
+        self.start_archive_task(
+            "build-index",
+            {
+                "roots": [str(root)],
+                "db_path": str(db_path),
+                "paz_dir": paz_dir_text,
+                "patterns": self.archive_patterns(self.archive_patterns_edit.toPlainText()),
+                "limit": limit,
+            },
+        )
+
+    def run_archive_index_search(self) -> None:
+        db_path = Path(self.archive_index_db_edit.text().strip())
+        if not db_path.exists():
+            QMessageBox.warning(self, "Missing Index DB", f"Archive index not found: {db_path}")
+            return
+        self.start_archive_task(
+            "search-index",
+            {
+                "db_path": str(db_path),
+                "patterns": self.archive_patterns(self.archive_search_globs_edit.text()),
+                "path_terms": self.archive_terms(self.archive_search_terms_edit.text()),
+                "limit": int(self.archive_search_limit_spin.value()),
+            },
+        )
+
+    def run_archive_correlation(self) -> None:
+        capture_path = Path(self.archive_capture_edit.text().strip())
+        db_path = Path(self.archive_index_db_edit.text().strip())
+        cache_dir = Path(self.archive_cache_dir_edit.text().strip())
+        if not capture_path.exists():
+            QMessageBox.warning(self, "Missing Capture", f"Capture file not found: {capture_path}")
+            return
+        if not db_path.exists():
+            QMessageBox.warning(self, "Missing Index DB", f"Archive index not found: {db_path}")
+            return
+        self.start_archive_task(
+            "correlate-archive",
+            {
+                "capture_path": str(capture_path),
+                "db_path": str(db_path),
+                "cache_dir": str(cache_dir),
+                "patterns": self.archive_patterns(self.archive_correlation_globs_edit.text()),
+                "path_terms": self.archive_terms(self.archive_correlation_terms_edit.text()),
+                "max_entries": int(self.archive_correlation_max_entries_spin.value()),
+                "max_matches": int(self.archive_correlation_max_matches_spin.value()),
+                "max_matches_per_evidence": int(self.archive_correlation_max_per_evidence_spin.value()),
+                "context_bytes": int(self.archive_correlation_context_spin.value()),
+                "include_numeric": self.archive_correlation_numeric_check.isChecked(),
+                "include_format_hints": self.archive_correlation_hints_check.isChecked(),
+                "decrypt_xml": self.archive_correlation_decrypt_check.isChecked(),
+            },
+        )
+
+    @Slot(str, dict)
+    def on_archive_task_result(self, task: str, result: dict[str, Any]) -> None:
+        if task == "build-index":
+            self.render_archive_index_report(result)
+            self.append_log(f"Archive index built with {result.get('indexed_count', 0)} entries.")
+            return
+        if task == "search-index":
+            self.render_archive_index_search(result)
+            self.append_log(f"Archive index search returned {result.get('entry_count', 0)} entries.")
+            return
+        if task == "correlate-archive":
+            self.render_archive_correlation(result)
+            self.append_log(f"Archive correlation returned {result.get('match_count', 0)} match(es).")
+
+    @Slot(str)
+    def on_archive_task_status(self, message: str) -> None:
+        self.archive_summary_label.setText(message)
+        self.status_label.setText(message)
+        self.append_log(message)
+
+    @Slot(str)
+    def on_archive_task_error(self, message: str) -> None:
+        self.archive_summary_label.setText(f"Archive task failed: {message}")
+        self.append_log(f"Archive task failed: {message}")
+        QMessageBox.warning(self, "Archive Task Failed", message)
+
+    @Slot()
+    def on_archive_task_finished(self) -> None:
+        self.archive_task_worker = None
+        self.archive_task_thread = None
+        self.set_archive_busy(False)
+
+    def render_archive_index_report(self, report: dict[str, Any]) -> None:
+        self.last_archive_index_report = report
+        self.archive_summary_label.setText(
+            f"Indexed {report.get('indexed_count', 0)} entries into {report.get('db_path', self.archive_index_db_edit.text())}."
+        )
+        self.archive_report_view.setPlainText(render_archive_index_markdown(report))
+
+    def render_archive_index_search(self, result: dict[str, Any]) -> None:
+        self.last_archive_index_search = result
+        entries = list(result.get("entries", []))
+        self.archive_summary_label.setText(
+            f"Index search found {result.get('entry_count', len(entries))} entries for {', '.join(result.get('patterns', []))}."
+        )
+        self.render_archive_index_entries(entries)
+        self.archive_report_view.setPlainText(json.dumps(result, ensure_ascii=False, indent=2))
+
+    def render_archive_index_entries(self, entries: list[dict[str, Any]]) -> None:
+        self.archive_index_table.setRowCount(len(entries))
+        for row_index, entry in enumerate(entries):
+            values = [
+                entry.get("path", ""),
+                entry.get("extension", ""),
+                entry.get("compression_name", ""),
+                Path(str(entry.get("paz_file", ""))).name,
+                entry.get("offset_hex", ""),
+                entry.get("comp_size", ""),
+                entry.get("orig_size", ""),
+                entry.get("flags_hex", ""),
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                item.setToolTip(str(value))
+                self.archive_index_table.setItem(row_index, column, item)
+        self.filter_archive_index_rows(self.archive_search_filter_edit.text())
+
+    def render_archive_correlation(self, result: dict[str, Any]) -> None:
+        self.last_archive_correlation = result
+        matches = list(result.get("matches", []))
+        self.archive_summary_label.setText(
+            f"Archive correlation found {result.get('match_count', 0)} matches from {result.get('candidate_entry_count', 0)} candidate entries. "
+            f"Decoded {result.get('decoded_entry_count', 0)} entries with {result.get('cache_hit_count', 0)} cache hits."
+        )
+        self.archive_correlation_table.setRowCount(len(matches))
+        for row_index, match in enumerate(matches):
+            values = [
+                match.get("confidence", ""),
+                match.get("archive_path", ""),
+                match.get("decoded_offset_hex", ""),
+                match.get("match_type", ""),
+                match.get("evidence_value", ""),
+                match.get("evidence_count", ""),
+                match.get("compression_decoder", ""),
+                match.get("original_bytes", ""),
+                match.get("cache_path", ""),
+                ", ".join(str(item) for item in match.get("confidence_reasons", [])),
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                item.setToolTip(str(value))
+                self.archive_correlation_table.setItem(row_index, column, item)
+        self.archive_report_view.setPlainText(render_archive_correlation_markdown(result))
+        self.filter_archive_correlation_rows(self.archive_correlation_filter_edit.text())
+
+    def filter_archive_index_rows(self, text: str) -> None:
+        self.filter_table_rows(self.archive_index_table, text)
+
+    def filter_archive_correlation_rows(self, text: str) -> None:
+        self.filter_table_rows(self.archive_correlation_table, text)
+
+    def filter_table_rows(self, table: QTableWidget, text: str) -> None:
+        needle = text.strip().lower()
+        for row in range(table.rowCount()):
+            visible = True
+            if needle:
+                visible = any(
+                    needle in table.item(row, column).text().lower()
+                    for column in range(table.columnCount())
+                    if table.item(row, column) is not None
+                )
+            table.setRowHidden(row, not visible)
+
+    def export_archive_index_report(self) -> None:
+        report = self.last_archive_index_report
+        if not report:
+            QMessageBox.information(self, "No Index Report", "Build an archive index first.")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Export Archive Index Report", "archive-index.md", "Markdown (*.md);;JSON (*.json);;CSV (*.csv);;All Files (*.*)")
+        if not path:
+            return
+        try:
+            suffix = Path(path).suffix.lower()
+            if suffix == ".json":
+                rendered = json.dumps(report, ensure_ascii=False, indent=2)
+            elif suffix == ".csv":
+                rendered = render_archive_index_csv(report)
+            else:
+                rendered = render_archive_index_markdown(report)
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).write_text(rendered, encoding="utf-8")
+            self.append_log(f"Exported archive index report to {path}.")
+        except Exception as exc:
+            QMessageBox.warning(self, "Export Failed", str(exc))
+
+    def export_archive_correlation(self) -> None:
+        result = self.last_archive_correlation
+        if not result:
+            QMessageBox.information(self, "No Correlation Results", "Run archive correlation first.")
+            return
+        fmt = self.archive_correlation_format_combo.currentText()
+        default_name = f"archive-correlation.{ 'md' if fmt == 'markdown' else fmt }"
+        path, _ = QFileDialog.getSaveFileName(self, "Export Archive Correlation", default_name, "All Files (*.*)")
+        if not path:
+            return
+        try:
+            if fmt == "json":
+                rendered = json.dumps(result, ensure_ascii=False, indent=2)
+            elif fmt == "csv":
+                rendered = render_archive_correlation_csv(result)
+            else:
+                rendered = render_archive_correlation_markdown(result)
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).write_text(rendered, encoding="utf-8")
+            self.append_log(f"Exported archive correlation results to {path}.")
+        except Exception as exc:
+            QMessageBox.warning(self, "Export Failed", str(exc))
+
     def build_log_tab(self) -> None:
         layout = QVBoxLayout(self.log_tab)
         self.log_view = QPlainTextEdit()
@@ -2598,6 +3148,10 @@ class MainWindow(QMainWindow):
         return f"Unknown command: {command}"
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
+        if self.archive_task_worker is not None:
+            event.ignore()
+            QMessageBox.information(self, "Archive Task Running", "Wait for the current archive task to finish before closing CDSniffer.")
+            return
         if (
             not self._force_close
             and self.tray_minimize_to_tray_check.isChecked()
