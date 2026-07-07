@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added copyable error summaries, structured action logs for major GUI workflows, and a rollback-friendly last-good settings snapshot with restore support
 - Added archive workflow preflight checks for archive roots, index DBs, cache folders, baseline captures, and selected decoded files
 - Added file-backed GUI settings profile helpers plus round-trip smoke coverage for export/import and normalized hotkeys
 - Hardened GUI hotkey handling with normalized validation, atomic import/apply behavior, and settings preview consistency

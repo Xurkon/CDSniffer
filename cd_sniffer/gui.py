@@ -7,6 +7,7 @@ import importlib.resources as resources
 import queue
 import re
 import shlex
+import traceback
 import threading
 import time
 from datetime import datetime, timezone
@@ -314,6 +315,11 @@ def normalize_hotkey_name(value: Any) -> str:
     hotkey = str(value if value is not None else "F8").strip().upper() or "F8"
     vk_from_name(hotkey)
     return hotkey
+
+
+def format_action_log(action: str, **fields: Any) -> str:
+    payload = {"action": action, **fields}
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
 def require_path(value: str, label: str, *, kind: str = "path") -> Path:
@@ -1111,6 +1117,7 @@ class MainWindow(QMainWindow):
         self.ipc_server.start()
         self._force_close = False
         self.tray_status_action = None
+        self.last_error_summary = ""
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -2477,6 +2484,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Archive Task Running", "Wait for the current archive task to finish first.")
             return
         self.set_archive_busy(True)
+        self.log_action("archive.task.start", task=task, params=params)
         self.archive_task_thread = QThread(self)
         self.archive_task_worker = ArchiveTaskWorker(task, params)
         self.archive_task_worker.moveToThread(self.archive_task_thread)
@@ -2615,33 +2623,40 @@ class MainWindow(QMainWindow):
         if task == "build-index":
             self.render_archive_index_report(result)
             self.append_log(f"Archive index built with {result.get('indexed_count', 0)} entries.")
+            self.log_action("archive.task.result", task=task, indexed_count=result.get("indexed_count", 0))
             return
         if task == "search-index":
             self.render_archive_index_search(result)
             self.append_log(f"Archive index search returned {result.get('entry_count', 0)} entries.")
+            self.log_action("archive.task.result", task=task, entry_count=result.get("entry_count", 0))
             return
         if task == "correlate-archive":
             self.render_archive_correlation(result)
             self.append_log(f"Archive correlation returned {result.get('match_count', 0)} match(es).")
+            self.log_action("archive.task.result", task=task, match_count=result.get("match_count", 0))
             return
         if task == "correlate-file":
             self.render_file_correlation(result)
             self.append_log(f"File correlation returned {result.get('match_count', 0)} match(es).")
+            self.log_action("archive.task.result", task=task, match_count=result.get("match_count", 0))
             return
         if task == "correlate-root":
             self.render_file_correlation(result)
             self.append_log(f"Folder correlation returned {result.get('match_count', 0)} match(es).")
+            self.log_action("archive.task.result", task=task, match_count=result.get("match_count", 0))
 
     @Slot(str)
     def on_archive_task_status(self, message: str) -> None:
         self.archive_summary_label.setText(message)
         self.status_label.setText(message)
         self.append_log(message)
+        self.log_action("archive.task.status", message=message)
 
     @Slot(str)
     def on_archive_task_error(self, message: str) -> None:
         self.archive_summary_label.setText(f"Archive task failed: {message}")
         self.append_log(f"Archive task failed: {message}")
+        self.show_error_summary("Archive Task Failed", message)
         QMessageBox.warning(self, "Archive Task Failed", message)
 
     @Slot()
@@ -2951,10 +2966,65 @@ class MainWindow(QMainWindow):
 
     def build_log_tab(self) -> None:
         layout = QVBoxLayout(self.log_tab)
+        toolbar = QHBoxLayout()
+        self.copy_error_button = QPushButton("Copy Last Error")
+        self.restore_last_good_button = QPushButton("Restore Last Good Settings")
+        self.copy_error_button.clicked.connect(self.copy_last_error_summary)
+        self.restore_last_good_button.clicked.connect(self.restore_last_good_settings_snapshot)
+        toolbar.addWidget(self.copy_error_button)
+        toolbar.addWidget(self.restore_last_good_button)
+        toolbar.addStretch(1)
+        layout.addLayout(toolbar)
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setFont(QFont("Cascadia Mono", 10))
         layout.addWidget(self.log_view)
+
+    def settings_snapshot_root(self) -> Path:
+        return Path.home() / ".cdsniffer"
+
+    def last_good_settings_path(self) -> Path:
+        return self.settings_snapshot_root() / "last-good-settings.json"
+
+    def write_last_good_settings_snapshot(self, settings: dict[str, Any] | None = None) -> None:
+        snapshot = dict(settings or self.collect_settings_dict())
+        path = self.last_good_settings_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def restore_last_good_settings_snapshot(self) -> None:
+        path = self.last_good_settings_path()
+        if not path.exists():
+            QMessageBox.information(self, "No Last-Good Snapshot", "No saved last-good settings snapshot exists yet.")
+            return
+        try:
+            self.load_settings_profile_from_path(path)
+            self.log_action("settings.restore", path=str(path))
+            self.append_log(f"Restored last-good settings snapshot from {path}.")
+        except Exception as exc:
+            QMessageBox.warning(self, "Restore Failed", str(exc))
+
+    def copy_last_error_summary(self) -> None:
+        if not self.last_error_summary:
+            QMessageBox.information(self, "No Error Summary", "No recent error summary is available yet.")
+            return
+        QApplication.clipboard().setText(self.last_error_summary)
+        self.log_action("error.copy_summary")
+        self.append_log("Copied last error summary to clipboard.")
+
+    def show_error_summary(self, title: str, message: str, *, details: str | None = None) -> None:
+        summary = {
+            "title": title,
+            "message": message,
+            "details": details or "",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        self.last_error_summary = json.dumps(summary, ensure_ascii=False, indent=2)
+        self.log_action("error", title=title, message=message, details=details or "")
+        QApplication.clipboard().setText(self.last_error_summary)
+
+    def log_action(self, action: str, **fields: Any) -> None:
+        self.append_log(format_action_log(action, **fields))
 
     def build_terminal_tab(self) -> None:
         layout = QVBoxLayout(self.terminal_tab)
@@ -3042,7 +3112,7 @@ class MainWindow(QMainWindow):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(self.collect_settings_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
             self.refresh_preset_list()
-            self.append_log(f"Saved preset: {path.stem}")
+            self.log_action("preset.save", path=str(path))
         except Exception as exc:
             QMessageBox.warning(self, "Save Failed", str(exc))
 
@@ -3056,7 +3126,7 @@ class MainWindow(QMainWindow):
             if not isinstance(settings, dict):
                 raise ValueError("Preset JSON must be an object.")
             self.apply_settings_dict(settings)
-            self.append_log(f"Loaded preset: {path.stem}")
+            self.log_action("preset.load", path=str(path))
         except Exception as exc:
             QMessageBox.warning(self, "Load Failed", str(exc))
 
@@ -3086,7 +3156,7 @@ class MainWindow(QMainWindow):
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             self.refresh_preset_list()
-            self.append_log(f"Imported preset: {dest.stem}")
+            self.log_action("preset.import", path=str(dest))
         except Exception as exc:
             QMessageBox.warning(self, "Import Failed", str(exc))
 
@@ -3100,7 +3170,7 @@ class MainWindow(QMainWindow):
             return
         try:
             Path(save_path).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-            self.append_log(f"Exported preset to {save_path}.")
+            self.log_action("preset.export", path=str(save_path))
         except Exception as exc:
             QMessageBox.warning(self, "Export Failed", str(exc))
 
@@ -3221,7 +3291,8 @@ class MainWindow(QMainWindow):
         profile = self.collect_settings_dict()
         target = Path(path)
         target.write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
-        self.append_log(f"Exported settings profile to {target}.")
+        self.write_last_good_settings_snapshot(profile)
+        self.log_action("settings.export", path=str(target))
 
     def load_settings_profile_from_path(self, path: str | Path) -> None:
         source = Path(path)
@@ -3229,7 +3300,7 @@ class MainWindow(QMainWindow):
         if not isinstance(settings, dict):
             raise ValueError("Profile JSON must be an object.")
         self.apply_settings_dict(settings)
-        self.append_log(f"Imported settings profile from {source}.")
+        self.log_action("settings.import", path=str(source))
 
     def collect_settings_dict(self) -> dict[str, Any]:
         pid_text = self.pid_edit.text().strip()
@@ -3358,6 +3429,7 @@ class MainWindow(QMainWindow):
         self.tray_notify_relinked_check.setChecked(bool(settings.get("tray_notify_relinked", True)))
         self.tray_notify_errors_check.setChecked(bool(settings.get("tray_notify_errors", True)))
         self.tray_notify_capture_complete_check.setChecked(bool(settings.get("tray_notify_capture_complete", False)))
+        self.write_last_good_settings_snapshot()
         self.refresh_capture_summary()
         self.refresh_target_indicator()
         self.refresh_tray_configuration()
@@ -3367,8 +3439,9 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.Accepted:
             try:
                 self.apply_settings_dict(dialog.settings_dict())
-                self.append_log("Settings updated.")
+                self.log_action("settings.apply", source="dialog")
             except Exception as exc:
+                self.show_error_summary("Settings Update Failed", str(exc), details=traceback.format_exc())
                 QMessageBox.warning(self, "Settings Update Failed", str(exc))
 
     def build_settings_namespace(self) -> argparse.Namespace:
@@ -3480,6 +3553,7 @@ class MainWindow(QMainWindow):
         self.refresh_target_indicator()
         self.update_tray_status("CDSniffer: capturing" if running else "CDSniffer: idle")
         self.notify_tray("capture_started" if running else "capture_stopped", "CDSniffer", "Capture started." if running else "Capture stopped.")
+        self.log_action("capture.running", running=running)
 
     def start_capture(self) -> None:
         if self.worker is not None:
@@ -3501,6 +3575,7 @@ class MainWindow(QMainWindow):
                     if not Path(pack).exists():
                         raise FileNotFoundError(f"Signature pack not found: {pack}")
         except Exception as exc:
+            self.show_error_summary("Invalid Settings", str(exc), details=traceback.format_exc())
             QMessageBox.warning(self, "Invalid Settings", str(exc))
             return
 
@@ -3509,7 +3584,7 @@ class MainWindow(QMainWindow):
             return
 
         self.set_running(True)
-        self.append_log(f"Starting capture in {args.mode} mode.")
+        self.log_action("capture.start", mode=args.mode, pid=args.pid, process=args.process, hotkey=args.hotkey)
         self.worker_thread = QThread(self)
         self.worker = CaptureWorker(vars(args))
         self.worker.moveToThread(self.worker_thread)
@@ -3525,10 +3600,10 @@ class MainWindow(QMainWindow):
 
     def stop_capture(self) -> None:
         if self.worker:
-            self.append_log("Stop requested.")
+            self.log_action("capture.stop", requested=True)
             self.worker.stop()
         else:
-            self.append_log("No active capture to stop.")
+            self.log_action("capture.stop", requested=False)
 
     @Slot(dict)
     def on_capture(self, payload: dict[str, Any]) -> None:
@@ -3557,7 +3632,7 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def on_error(self, message: str) -> None:
-        self.append_log(f"Error: {message}")
+        self.show_error_summary("Capture Error", message)
         self.notify_tray("errors", "CDSniffer Error", message)
         QMessageBox.critical(self, "Capture Error", message)
 
@@ -3606,7 +3681,7 @@ class MainWindow(QMainWindow):
                 settings = dict(command.payload.get("settings") or {})
                 if settings:
                     self.apply_settings_dict(settings)
-                    self.append_log("Settings updated from CLI.")
+                    self.log_action("settings.apply", source="cli")
             else:
                 self.append_log(f"Unknown IPC command: {command.command}")
 

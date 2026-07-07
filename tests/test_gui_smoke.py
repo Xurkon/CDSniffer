@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -165,6 +166,46 @@ class GuiSmokeTests(unittest.TestCase):
             finally:
                 window.close()
                 app.processEvents()
+
+    def test_error_summary_copies_to_clipboard(self):
+        app = QApplication.instance() or QApplication([])
+        window = MainWindow()
+        try:
+            window.show_error_summary("Test Error", "Something went wrong")
+            payload = json.loads(QApplication.clipboard().text())
+            self.assertEqual(payload["title"], "Test Error")
+            self.assertEqual(payload["message"], "Something went wrong")
+            self.assertIn("timestamp", payload)
+        finally:
+            window.close()
+            app.processEvents()
+
+    def test_last_good_settings_snapshot_can_be_restored(self):
+        app = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            fake_home = Path(tmp_dir)
+            with patch("cd_sniffer.gui.Path.home", return_value=fake_home):
+                window = MainWindow()
+                try:
+                    original = dict(window.collect_settings_dict())
+                    original["hotkey"] = "G"
+                    original["mode"] = "hotkey"
+                    original["unique_only"] = True
+                    window.apply_settings_dict(original)
+                    snapshot_path = fake_home / ".cdsniffer" / "last-good-settings.json"
+                    self.assertTrue(snapshot_path.exists())
+
+                    window.hotkey_edit.setText("F8")
+                    window.mode_combo.setCurrentText("loop")
+                    window.unique_only_check.setChecked(False)
+                    window.restore_last_good_settings_snapshot()
+
+                    self.assertEqual(window.hotkey_edit.text(), "G")
+                    self.assertEqual(window.mode_combo.currentText(), "hotkey")
+                    self.assertTrue(window.unique_only_check.isChecked())
+                finally:
+                    window.close()
+                    app.processEvents()
 
 
 if __name__ == "__main__":
