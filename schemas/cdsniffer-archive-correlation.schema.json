@@ -69,6 +69,21 @@
       "type": "integer",
       "minimum": 0
     },
+    "raw_match_limit": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "pre_limit_match_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "truncated_at_raw_match_count": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
     "format_hint_count": {
       "type": "integer",
       "minimum": 0

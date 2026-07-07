@@ -413,6 +413,31 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(mission_b["diff_status"], "target-only")
         self.assertIn("target-only", mission_b["confidence_reasons"])
 
+    def test_correlator_can_scan_one_selected_unpacked_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            unpacked = root / "unpacked"
+            unpacked.mkdir()
+            selected = unpacked / "selected_mission.paseq"
+            ignored = unpacked / "ignored_mission.paseq"
+            selected.write_bytes(b"Mission_Selected")
+            ignored.write_bytes(b"Mission_Selected")
+            capture = root / "capture.jsonl"
+            capture.write_text(json_line(capture_payload(["Mission_Selected"])), encoding="utf-8")
+
+            result = correlate_capture_to_files(
+                capture,
+                unpacked,
+                selected_files=[selected],
+                patterns=["*.paseq"],
+                max_total_matches=10,
+            )
+
+        self.assertEqual(result["file_count"], 1)
+        self.assertEqual(result["selected_files"], [str(selected)])
+        self.assertEqual(result["match_count"], 1)
+        self.assertEqual(result["matches"][0]["relative_file"], "selected_mission.paseq")
+
     def test_correlator_adds_json_record_format_hints(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -625,6 +650,33 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(second["cache_hit_count"], 1)
             self.assertTrue(Path(first["matches"][0]["cache_path"]).exists())
             self.assertIn("# CDSniffer Archive Correlation Results", md_text)
+
+    def test_archive_correlation_reports_truncation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            raw = b"Mission_A----Mission_B----Mission_C----Mission_D"
+            pamt = write_synthetic_pamt(root, "data/mission.paseq", comp_size=len(raw), orig_size=len(raw), flags=0)
+            (root / "0.paz").write_bytes(raw)
+            db_path = root / "archive-index.sqlite"
+            cache_dir = root / "cache"
+            capture = root / "capture.jsonl"
+            capture.write_text(json_line(capture_payload(["Mission_A", "Mission_B", "Mission_C", "Mission_D"])), encoding="utf-8")
+
+            build_archive_index(db_path, [pamt], patterns=["*.paseq"])
+            result = correlate_capture_to_archive(
+                capture,
+                db_path,
+                cache_dir,
+                patterns=["*.paseq"],
+                max_entries=10,
+                max_total_matches=1,
+                max_matches_per_evidence=10,
+            )
+
+        self.assertTrue(result["truncated"])
+        self.assertEqual(result["raw_match_limit"], 4)
+        self.assertEqual(result["truncated_at_raw_match_count"], 4)
+        self.assertEqual(result["match_count"], 1)
 
     def test_paz_hashlittle_uses_documented_vector(self):
         self.assertEqual(hashlittle(b"rendererconfigurationmaterial.xml", 0x000C5EDE), 0xAF3DCEF3)

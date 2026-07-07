@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added `--correlate-file`, GUI decoded-file selection, and an embedded-terminal `correlate-file` command for focused comparison against one selected unpacked/cache file
+- Added archive-correlation truncation metadata so reports indicate when raw or grouped matches were capped
 - Refined the GUI theme with flatter panels, fewer decorative borders, and clearer game detection status text
 - Fixed GUI startup initialization order now that PySide6 verification can instantiate the main window
 - Added a dedicated GUI `Archives` tab for building archive indexes, searching indexed PAMT/PAZ entries, correlating captures against decoded archive entries, filtering result tables, and exporting index/correlation reports

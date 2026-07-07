@@ -267,8 +267,10 @@ def correlate_capture_to_archive(
     decoded_count = 0
     cache_hit_count = 0
     raw_limit = max_total_matches * 4
+    truncated = False
     for entry in entries:
         if len(raw_matches) >= raw_limit:
+            truncated = True
             break
         try:
             cache_path, blob, cache_info = cache_decoded_entry(entry, cache_dir, decrypt_xml=decrypt_xml)
@@ -292,9 +294,14 @@ def correlate_capture_to_archive(
                 include_format_hints=include_format_hints,
             )
         )
+        if len(raw_matches) >= raw_limit:
+            truncated = True
 
     matches = aggregate_archive_correlation_matches(raw_matches)
     matches.sort(key=lambda item: (-float(item["confidence"]), str(item["archive_path"]), int(item["decoded_offset"])))
+    pre_limit_match_count = len(matches)
+    if pre_limit_match_count > max_total_matches:
+        truncated = True
     matches = matches[:max_total_matches]
     return {
         "schema_version": 1,
@@ -310,6 +317,10 @@ def correlate_capture_to_archive(
         "cache_hit_count": cache_hit_count,
         "decode_error_count": len(decode_errors),
         "raw_match_count": len(raw_matches),
+        "raw_match_limit": raw_limit,
+        "pre_limit_match_count": pre_limit_match_count,
+        "truncated": truncated,
+        "truncated_at_raw_match_count": len(raw_matches) if truncated else None,
         "format_hint_count": sum(len(match.get("format_hints", [])) for match in matches),
         "match_count": len(matches),
         "matches": matches,

@@ -908,6 +908,21 @@ class ArchiveTaskWorker(QObject):
                 )
                 self.result.emit(self.task, result)
                 return
+            if self.task == "correlate-file":
+                selected_file = Path(self.params["selected_file"])
+                self.status.emit(f"Correlating capture against {selected_file.name}...")
+                result = correlate_capture_to_files(
+                    Path(self.params["capture_path"]),
+                    selected_file.parent,
+                    selected_files=[selected_file],
+                    max_matches_per_evidence=int(self.params["max_matches_per_evidence"]),
+                    max_total_matches=int(self.params["max_matches"]),
+                    include_numeric=bool(self.params["include_numeric"]),
+                    context_bytes=int(self.params["context_bytes"]),
+                    include_format_hints=bool(self.params["include_format_hints"]),
+                )
+                self.result.emit(self.task, result)
+                return
             raise ValueError(f"Unknown archive task: {self.task}")
         except Exception as exc:
             self.error.emit(str(exc))
@@ -1942,6 +1957,12 @@ class MainWindow(QMainWindow):
         self.archive_browse_capture_button.clicked.connect(self.browse_archive_capture)
         self.archive_browse_cache_button = QPushButton("Browse Cache")
         self.archive_browse_cache_button.clicked.connect(self.browse_archive_cache)
+        self.archive_selected_file_edit = QLineEdit()
+        self.archive_selected_file_edit.setPlaceholderText("Optional decoded/unpacked file for focused comparison")
+        self.archive_browse_selected_file_button = QPushButton("Browse Decoded File")
+        self.archive_browse_selected_file_button.clicked.connect(self.browse_archive_selected_file)
+        self.archive_correlate_file_button = QPushButton("Run File Correlation")
+        self.archive_correlate_file_button.clicked.connect(self.run_selected_file_correlation)
         self.archive_correlate_button = QPushButton("Run Archive Correlation")
         self.archive_correlate_button.clicked.connect(self.run_archive_correlation)
         self.archive_export_correlation_button = QPushButton("Export Correlation")
@@ -1955,26 +1976,30 @@ class MainWindow(QMainWindow):
         correlate_layout.addWidget(QLabel("Cache dir"), 1, 0)
         correlate_layout.addWidget(self.archive_cache_dir_edit, 1, 1, 1, 4)
         correlate_layout.addWidget(self.archive_browse_cache_button, 1, 5)
-        correlate_layout.addWidget(QLabel("Globs"), 2, 0)
-        correlate_layout.addWidget(self.archive_correlation_globs_edit, 2, 1, 1, 2)
-        correlate_layout.addWidget(QLabel("Path terms"), 2, 3)
-        correlate_layout.addWidget(self.archive_correlation_terms_edit, 2, 4, 1, 2)
-        correlate_layout.addWidget(QLabel("Max entries"), 3, 0)
-        correlate_layout.addWidget(self.archive_correlation_max_entries_spin, 3, 1)
-        correlate_layout.addWidget(QLabel("Max matches"), 3, 2)
-        correlate_layout.addWidget(self.archive_correlation_max_matches_spin, 3, 3)
-        correlate_layout.addWidget(QLabel("Per evidence"), 3, 4)
-        correlate_layout.addWidget(self.archive_correlation_max_per_evidence_spin, 3, 5)
-        correlate_layout.addWidget(QLabel("Context bytes"), 4, 0)
-        correlate_layout.addWidget(self.archive_correlation_context_spin, 4, 1)
-        correlate_layout.addWidget(self.archive_correlation_numeric_check, 4, 2)
-        correlate_layout.addWidget(self.archive_correlation_hints_check, 4, 3)
-        correlate_layout.addWidget(self.archive_correlation_decrypt_check, 4, 4)
-        correlate_layout.addWidget(self.archive_correlation_format_combo, 4, 5)
-        correlate_layout.addWidget(self.archive_correlate_button, 5, 0, 1, 2)
-        correlate_layout.addWidget(self.archive_export_correlation_button, 5, 2, 1, 2)
-        correlate_layout.addWidget(QLabel("Table filter"), 6, 0)
-        correlate_layout.addWidget(self.archive_correlation_filter_edit, 6, 1, 1, 5)
+        correlate_layout.addWidget(QLabel("Decoded file"), 2, 0)
+        correlate_layout.addWidget(self.archive_selected_file_edit, 2, 1, 1, 4)
+        correlate_layout.addWidget(self.archive_browse_selected_file_button, 2, 5)
+        correlate_layout.addWidget(QLabel("Globs"), 3, 0)
+        correlate_layout.addWidget(self.archive_correlation_globs_edit, 3, 1, 1, 2)
+        correlate_layout.addWidget(QLabel("Path terms"), 3, 3)
+        correlate_layout.addWidget(self.archive_correlation_terms_edit, 3, 4, 1, 2)
+        correlate_layout.addWidget(QLabel("Max entries"), 4, 0)
+        correlate_layout.addWidget(self.archive_correlation_max_entries_spin, 4, 1)
+        correlate_layout.addWidget(QLabel("Max matches"), 4, 2)
+        correlate_layout.addWidget(self.archive_correlation_max_matches_spin, 4, 3)
+        correlate_layout.addWidget(QLabel("Per evidence"), 4, 4)
+        correlate_layout.addWidget(self.archive_correlation_max_per_evidence_spin, 4, 5)
+        correlate_layout.addWidget(QLabel("Context bytes"), 5, 0)
+        correlate_layout.addWidget(self.archive_correlation_context_spin, 5, 1)
+        correlate_layout.addWidget(self.archive_correlation_numeric_check, 5, 2)
+        correlate_layout.addWidget(self.archive_correlation_hints_check, 5, 3)
+        correlate_layout.addWidget(self.archive_correlation_decrypt_check, 5, 4)
+        correlate_layout.addWidget(self.archive_correlation_format_combo, 5, 5)
+        correlate_layout.addWidget(self.archive_correlate_button, 6, 0, 1, 2)
+        correlate_layout.addWidget(self.archive_correlate_file_button, 6, 2, 1, 2)
+        correlate_layout.addWidget(self.archive_export_correlation_button, 6, 4, 1, 2)
+        correlate_layout.addWidget(QLabel("Table filter"), 7, 0)
+        correlate_layout.addWidget(self.archive_correlation_filter_edit, 7, 1, 1, 5)
         layout.addWidget(correlate_box)
 
         self.archive_summary_label = QLabel("No archive operation run yet.")
@@ -2035,6 +2060,7 @@ class MainWindow(QMainWindow):
         self.last_archive_index_report: dict[str, Any] | None = None
         self.last_archive_index_search: dict[str, Any] | None = None
         self.last_archive_correlation: dict[str, Any] | None = None
+        self.last_file_correlation: dict[str, Any] | None = None
 
     def archive_patterns(self, text: str) -> list[str]:
         return split_values(text)
@@ -2062,11 +2088,18 @@ class MainWindow(QMainWindow):
         if path:
             self.archive_cache_dir_edit.setText(path)
 
+    def browse_archive_selected_file(self) -> None:
+        start = self.archive_selected_file_edit.text().strip() or self.archive_cache_dir_edit.text().strip() or str(Path.cwd())
+        path, _ = QFileDialog.getOpenFileName(self, "Select Decoded or Unpacked File", start, "Decoded Files (*.paseq *.json *.xml *.bin);;All Files (*.*)")
+        if path:
+            self.archive_selected_file_edit.setText(path)
+
     def set_archive_busy(self, busy: bool) -> None:
         for button_name in [
             "archive_build_index_button",
             "archive_search_button",
             "archive_correlate_button",
+            "archive_correlate_file_button",
             "archive_export_index_button",
             "archive_export_correlation_button",
         ]:
@@ -2162,6 +2195,28 @@ class MainWindow(QMainWindow):
             },
         )
 
+    def run_selected_file_correlation(self) -> None:
+        capture_path = Path(self.archive_capture_edit.text().strip())
+        selected_file = Path(self.archive_selected_file_edit.text().strip())
+        if not capture_path.exists():
+            QMessageBox.warning(self, "Missing Capture", f"Capture file not found: {capture_path}")
+            return
+        if not selected_file.exists() or not selected_file.is_file():
+            QMessageBox.warning(self, "Missing Decoded File", f"Decoded/unpacked file not found: {selected_file}")
+            return
+        self.start_archive_task(
+            "correlate-file",
+            {
+                "capture_path": str(capture_path),
+                "selected_file": str(selected_file),
+                "max_matches": int(self.archive_correlation_max_matches_spin.value()),
+                "max_matches_per_evidence": int(self.archive_correlation_max_per_evidence_spin.value()),
+                "context_bytes": int(self.archive_correlation_context_spin.value()),
+                "include_numeric": self.archive_correlation_numeric_check.isChecked(),
+                "include_format_hints": self.archive_correlation_hints_check.isChecked(),
+            },
+        )
+
     @Slot(str, dict)
     def on_archive_task_result(self, task: str, result: dict[str, Any]) -> None:
         if task == "build-index":
@@ -2175,6 +2230,10 @@ class MainWindow(QMainWindow):
         if task == "correlate-archive":
             self.render_archive_correlation(result)
             self.append_log(f"Archive correlation returned {result.get('match_count', 0)} match(es).")
+            return
+        if task == "correlate-file":
+            self.render_file_correlation(result)
+            self.append_log(f"File correlation returned {result.get('match_count', 0)} match(es).")
 
     @Slot(str)
     def on_archive_task_status(self, message: str) -> None:
@@ -2231,6 +2290,7 @@ class MainWindow(QMainWindow):
 
     def render_archive_correlation(self, result: dict[str, Any]) -> None:
         self.last_archive_correlation = result
+        self.last_file_correlation = None
         matches = list(result.get("matches", []))
         self.archive_summary_label.setText(
             f"Archive correlation found {result.get('match_count', 0)} matches from {result.get('candidate_entry_count', 0)} candidate entries. "
@@ -2255,6 +2315,35 @@ class MainWindow(QMainWindow):
                 item.setToolTip(str(value))
                 self.archive_correlation_table.setItem(row_index, column, item)
         self.archive_report_view.setPlainText(render_archive_correlation_markdown(result))
+        self.filter_archive_correlation_rows(self.archive_correlation_filter_edit.text())
+
+    def render_file_correlation(self, result: dict[str, Any]) -> None:
+        self.last_file_correlation = result
+        self.last_archive_correlation = None
+        matches = list(result.get("matches", []))
+        selected = ", ".join(result.get("selected_files", [])) or result.get("root", "")
+        self.archive_summary_label.setText(
+            f"File correlation found {result.get('match_count', 0)} matches in {result.get('file_count', 0)} selected file(s)."
+        )
+        self.archive_correlation_table.setRowCount(len(matches))
+        for row_index, match in enumerate(matches):
+            values = [
+                match.get("confidence", ""),
+                match.get("relative_file") or match.get("file", ""),
+                match.get("offset_hex", ""),
+                match.get("match_type", ""),
+                match.get("evidence_value", ""),
+                match.get("evidence_count", ""),
+                "selected-file",
+                match.get("original_bytes", ""),
+                selected,
+                ", ".join(str(item) for item in match.get("confidence_reasons", [])),
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                item.setToolTip(str(value))
+                self.archive_correlation_table.setItem(row_index, column, item)
+        self.archive_report_view.setPlainText(render_correlation_markdown(result))
         self.filter_archive_correlation_rows(self.archive_correlation_filter_edit.text())
 
     def filter_archive_index_rows(self, text: str) -> None:
@@ -2298,22 +2387,24 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Export Failed", str(exc))
 
     def export_archive_correlation(self) -> None:
-        result = self.last_archive_correlation
+        result = self.last_archive_correlation or self.last_file_correlation
         if not result:
-            QMessageBox.information(self, "No Correlation Results", "Run archive correlation first.")
+            QMessageBox.information(self, "No Correlation Results", "Run archive or file correlation first.")
             return
         fmt = self.archive_correlation_format_combo.currentText()
-        default_name = f"archive-correlation.{ 'md' if fmt == 'markdown' else fmt }"
-        path, _ = QFileDialog.getSaveFileName(self, "Export Archive Correlation", default_name, "All Files (*.*)")
+        is_file_correlation = self.last_file_correlation is not None
+        default_prefix = "file-correlation" if is_file_correlation else "archive-correlation"
+        default_name = f"{default_prefix}.{ 'md' if fmt == 'markdown' else fmt }"
+        path, _ = QFileDialog.getSaveFileName(self, "Export Correlation", default_name, "All Files (*.*)")
         if not path:
             return
         try:
             if fmt == "json":
                 rendered = json.dumps(result, ensure_ascii=False, indent=2)
             elif fmt == "csv":
-                rendered = render_archive_correlation_csv(result)
+                rendered = render_correlation_csv(result) if is_file_correlation else render_archive_correlation_csv(result)
             else:
-                rendered = render_archive_correlation_markdown(result)
+                rendered = render_correlation_markdown(result) if is_file_correlation else render_archive_correlation_markdown(result)
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Path(path).write_text(rendered, encoding="utf-8")
             self.append_log(f"Exported archive correlation results to {path}.")
@@ -2983,6 +3074,7 @@ class MainWindow(QMainWindow):
                 "search <query>, search-clear, search-export [path], search-import [path], "
                 "archive-index <archive-root> <index-db> [glob...], "
                 "correlate <capture> <root> [json|csv|markdown], "
+                "correlate-file <capture> <decoded-file> [json|csv|markdown], "
                 "correlate-diff <baseline> <target> <root> [json|csv|markdown], "
                 "correlate-archive <capture> <index-db> <cache-dir> [json|csv|markdown] [glob...], "
                 "apply <json>, refresh"
@@ -3091,6 +3183,33 @@ class MainWindow(QMainWindow):
                 return render_correlation_markdown(result)
             except Exception as exc:
                 return f"Correlation failed: {exc}"
+        if command == "correlate-file":
+            if len(parts) < 3:
+                return "Usage: correlate-file <capture.jsonl> <decoded-file> [json|csv|markdown]"
+            capture_path = Path(parts[1])
+            selected_file = Path(parts[2])
+            output_format = parts[3].lower() if len(parts) > 3 else "markdown"
+            if output_format not in {"json", "csv", "markdown"}:
+                return "Correlation format must be json, csv, or markdown."
+            if not capture_path.exists():
+                return f"Capture file not found: {capture_path}"
+            if not selected_file.exists() or not selected_file.is_file():
+                return f"Decoded/unpacked file not found: {selected_file}"
+            try:
+                result = correlate_capture_to_files(
+                    capture_path,
+                    selected_file.parent,
+                    selected_files=[selected_file],
+                    max_total_matches=50,
+                    max_matches_per_evidence=10,
+                )
+                if output_format == "json":
+                    return json.dumps(result, ensure_ascii=False, indent=2)
+                if output_format == "csv":
+                    return render_correlation_csv(result)
+                return render_correlation_markdown(result)
+            except Exception as exc:
+                return f"File correlation failed: {exc}"
         if command == "correlate-archive":
             if len(parts) < 4:
                 return "Usage: correlate-archive <capture.jsonl> <index-db> <cache-dir> [json|csv|markdown] [glob...]"

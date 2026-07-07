@@ -22,6 +22,12 @@
     "root": {
       "type": "string"
     },
+    "selected_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "recursive": {
       "type": "boolean"
     },

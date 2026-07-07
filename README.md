@@ -253,11 +253,26 @@ Correlate a capture against unpacked files:
 python -m cd_sniffer --correlate-capture logs\camp-mission.jsonl --correlate-root D:\Documents\CrimsonDesertMods\unpacked --correlate-glob *.json --correlate-glob *.paseq --correlate-format markdown --correlate-output logs\correlation.md
 ```
 
+Correlate a capture against one selected decoded or unpacked file:
+
+```powershell
+python -m cd_sniffer --correlate-capture logs\camp-mission.jsonl --correlate-file D:\Documents\CrimsonDesertMods\decoded\sequencer\binary__\baseseq\gimmickcalledseq\gimmick_craft_shortcook_oven_00.paseq --correlate-format markdown --correlate-output logs\selected-file-correlation.md
+```
+
 Correlate a baseline/target pair against unpacked files:
 
 ```powershell
 python -m cd_sniffer --correlate-baseline logs\before-camp-ui.jsonl --correlate-target logs\camp-ui-open.jsonl --correlate-root D:\Documents\CrimsonDesertMods\unpacked --correlate-glob *.json --correlate-glob *.paseq --correlate-format markdown --correlate-output logs\correlation-diff.md
 ```
+
+How unpacking, decoding, and comparison fit together:
+
+- `--archive-list` only reads PAMT metadata and helps you find candidate archive paths.
+- `--archive-extract` decodes matching PAZ entries into ordinary files you can inspect or pass to `--correlate-file`.
+- `--archive-index` stores archive metadata in SQLite so repeated archive searches do not reparse every PAMT.
+- `--correlate-archive` compares a capture against indexed archive entries directly; it lazily decodes candidates into `--correlate-archive-cache` and reports each decoded cache path.
+- `--correlate-root` scans a whole unpacked/decoded folder tree.
+- `--correlate-file` scans only the selected decoded/unpacked file, which is best when the archive report or manual review already gave you one likely target.
 
 Useful correlation options:
 
@@ -265,6 +280,7 @@ Useful correlation options:
 - `--correlate-target` is an explicit target-capture alias for diff workflows
 - `--correlate-baseline` compares a before-state capture against the target capture
 - `--correlate-root` points to the unpacked/game file tree to scan
+- `--correlate-file` points to one specific decoded/unpacked file to scan and can be repeated
 - `--correlate-glob` limits scanned files by glob and can be repeated
 - `--correlate-max-file-size` skips huge files
 - `--correlate-max-matches` limits total results
@@ -307,6 +323,7 @@ Search the live GUI capture:
 - Use the embedded terminal with `search <query>` or `search-clear`
 - Use the embedded terminal with `search-export [path]` and `search-import [path]` to manage search presets
 - Use the embedded terminal with `correlate <capture> <root> [json|csv|markdown]` to run a compact file-offset report
+- Use the embedded terminal with `correlate-file <capture> <decoded-file> [json|csv|markdown]` to compare against one selected file
 - Use the embedded terminal with `correlate-diff <baseline> <target> <root> [json|csv|markdown]` to compare before/after captures
 - Use the embedded terminal with `archive-index <archive-root> <index-db> [glob...]` to build a reusable archive index
 - Use the embedded terminal with `correlate-archive <capture> <index-db> <cache-dir> [json|csv|markdown] [glob...]` to correlate a capture against indexed game archives
@@ -325,6 +342,7 @@ Use the GUI `Archives` tab:
 - Use `Search Indexed Archive Entries` to quickly inspect archive paths before decoding anything
 - Set `Capture` to a CDSniffer JSON/JSONL capture and `Cache dir` to a decoded cache folder
 - Use archive correlation globs and path terms to narrow candidates before clicking `Run Archive Correlation`
+- Use `Decoded file` plus `Run File Correlation` when you want to compare the capture against one selected unpacked/cache file instead of an entire folder or archive index
 - Inspect the `Correlation Matches` table for confidence, decoded offset, evidence value, decoder, original bytes, cache path, and confidence reasons
 - Export the latest index summary or correlation report from the tab when sharing results
 

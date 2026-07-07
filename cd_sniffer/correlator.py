@@ -195,6 +195,20 @@ def iter_candidate_files(
     return sorted(dict.fromkeys(paths))
 
 
+def selected_candidate_files(files: list[Path], *, max_file_size: int = 64 * 1024 * 1024) -> list[Path]:
+    selected: list[Path] = []
+    for path in files:
+        if not path.is_file():
+            raise FileNotFoundError(f"Correlation file not found: {path}")
+        try:
+            if max_file_size > 0 and path.stat().st_size > max_file_size:
+                continue
+        except OSError:
+            continue
+        selected.append(path)
+    return sorted(dict.fromkeys(selected))
+
+
 def find_all_offsets(blob: bytes, needle: bytes, limit: int | None = None) -> list[int]:
     if not needle:
         return []
@@ -489,6 +503,7 @@ def correlate_capture_to_files(
     root: Path,
     *,
     baseline_capture_path: Path | None = None,
+    selected_files: list[Path] | None = None,
     recursive: bool = True,
     patterns: list[str] | None = None,
     max_file_size: int = 64 * 1024 * 1024,
@@ -503,7 +518,10 @@ def correlate_capture_to_files(
     context_bytes = max(0, context_bytes)
     max_file_size = max(0, max_file_size)
     evidence_items = extract_evidence_from_capture(capture_path, include_numeric=include_numeric)
-    files = iter_candidate_files(root, recursive=recursive, patterns=patterns, max_file_size=max_file_size)
+    if selected_files is not None:
+        files = selected_candidate_files(selected_files, max_file_size=max_file_size)
+    else:
+        files = iter_candidate_files(root, recursive=recursive, patterns=patterns, max_file_size=max_file_size)
 
     raw_matches = _collect_raw_matches(
         evidence_items,
@@ -548,6 +566,7 @@ def correlate_capture_to_files(
         "capture_path": str(capture_path),
         "baseline_capture_path": str(baseline_capture_path) if baseline_capture_path is not None else None,
         "root": str(root),
+        "selected_files": [str(path) for path in selected_files] if selected_files is not None else [],
         "recursive": recursive,
         "patterns": patterns or ["*"],
         "max_file_size": max_file_size,
