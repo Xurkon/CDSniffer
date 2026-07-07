@@ -68,6 +68,24 @@ class GuiSmokeTests(unittest.TestCase):
             widget.close()
             app.processEvents()
 
+    def test_settings_roundtrip_normalizes_and_rejects_invalid_hotkeys(self):
+        app = QApplication.instance() or QApplication([])
+        window = MainWindow()
+        try:
+            window.hotkey_edit.setText("g")
+            collected = window.collect_settings_dict()
+            self.assertEqual(collected["hotkey"], "G")
+
+            original_hotkey = window.hotkey_edit.text()
+            bad_settings = dict(collected)
+            bad_settings["hotkey"] = "CTRL+G"
+            with self.assertRaises(ValueError):
+                window.apply_settings_dict(bad_settings)
+            self.assertEqual(window.hotkey_edit.text(), original_hotkey)
+        finally:
+            window.close()
+            app.processEvents()
+
 
 if __name__ == "__main__":
     unittest.main()

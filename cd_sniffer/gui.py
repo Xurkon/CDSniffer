@@ -310,6 +310,12 @@ def set_widget_tips(items: list[tuple[Any, str]]) -> None:
         widget.setStatusTip(tip)
 
 
+def normalize_hotkey_name(value: Any) -> str:
+    hotkey = str(value if value is not None else "F8").strip().upper() or "F8"
+    vk_from_name(hotkey)
+    return hotkey
+
+
 class HotkeyLineEdit(QLineEdit):
     def __init__(self, text: str = "") -> None:
         super().__init__(text)
@@ -345,7 +351,7 @@ class HotkeyLineEdit(QLineEdit):
         if Qt.Key_0 <= key <= Qt.Key_9:
             return chr(key)
         if Qt.Key_A <= key <= Qt.Key_Z:
-            return chr(key)
+            return chr(key).upper()
 
         specials = {
             Qt.Key_Space: "SPACE",
@@ -640,7 +646,7 @@ class SettingsDialog(QDialog):
     def settings_dict(self) -> dict[str, Any]:
         return {
             "mode": self.mode.currentText(),
-            "hotkey": self.hotkey.text().strip() or "F8",
+            "hotkey": normalize_hotkey_name(self.hotkey.text()),
             "interval": float(self.interval.value()),
             "captures": self.captures.value() or None,
             "output": self.output.text().strip() or "logs/cdsniffer.jsonl",
@@ -1925,7 +1931,7 @@ class MainWindow(QMainWindow):
                     f"PID: {self.pid_edit.text().strip() or 'not set'}",
                     f"Process: {self.process_edit.text().strip() or 'Crimson Desert'}",
                     f"Mode: {self.mode_combo.currentText()}",
-                    f"Hotkey: {self.hotkey_edit.text().strip() or 'F8'}",
+                    f"Hotkey: {normalize_hotkey_name(self.hotkey_edit.text())}",
                     f"Output: {self.output_edit.text().strip() or 'logs/cdsniffer.jsonl'}",
                     f"Format: {self.format_combo.currentText()}",
                     f"Context bytes: {self.context_bytes_spin.value()}",
@@ -3212,7 +3218,7 @@ class MainWindow(QMainWindow):
             "pick_window": False,
             "list_windows": False,
             "mode": self.mode_combo.currentText(),
-            "hotkey": self.hotkey_edit.text().strip() or "F8",
+            "hotkey": normalize_hotkey_name(self.hotkey_edit.text()),
             "interval": float(self.interval_spin.value()),
             "captures": self.captures_spin.value() or None,
             "output": self.output_edit.text().strip() or "logs/cdsniffer.jsonl",
@@ -3262,13 +3268,14 @@ class MainWindow(QMainWindow):
         }
 
     def apply_settings_dict(self, settings: dict[str, Any]) -> None:
+        hotkey = normalize_hotkey_name(settings.get("hotkey", "F8"))
         if settings.get("pid") is not None:
             self.pid_edit.setText(str(settings["pid"]))
         self.process_edit.setText(str(settings.get("process", "Crimson Desert")))
         self.window_title_edit.setText("\n".join(settings.get("window_titles", [])))
         self.window_filter_edit.setText("\n".join(settings.get("window_filter_patterns", [])))
         self.mode_combo.setCurrentText(str(settings.get("mode", "loop")))
-        self.hotkey_edit.setText(str(settings.get("hotkey", "F8")))
+        self.hotkey_edit.setText(hotkey)
         self.interval_spin.setValue(float(settings.get("interval", 2.0)))
         captures_value = settings.get("captures")
         self.captures_spin.setValue(int(captures_value) if captures_value else 0)
@@ -3334,8 +3341,11 @@ class MainWindow(QMainWindow):
     def open_settings_dialog(self) -> None:
         dialog = SettingsDialog(self, self.collect_settings_dict())
         if dialog.exec() == QDialog.Accepted:
-            self.apply_settings_dict(dialog.settings_dict())
-            self.append_log("Settings updated.")
+            try:
+                self.apply_settings_dict(dialog.settings_dict())
+                self.append_log("Settings updated.")
+            except Exception as exc:
+                QMessageBox.warning(self, "Settings Update Failed", str(exc))
 
     def build_settings_namespace(self) -> argparse.Namespace:
         pid_text = self.pid_edit.text().strip()
@@ -3348,7 +3358,7 @@ class MainWindow(QMainWindow):
             "pick_window": False,
             "list_windows": False,
             "mode": self.mode_combo.currentText(),
-            "hotkey": self.hotkey_edit.text().strip() or "F8",
+            "hotkey": normalize_hotkey_name(self.hotkey_edit.text()),
             "interval": float(self.interval_spin.value()),
             "captures": self.captures_spin.value() or None,
             "output": self.output_edit.text().strip() or "logs/cdsniffer.jsonl",

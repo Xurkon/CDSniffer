@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Hardened GUI hotkey handling with normalized validation, atomic import/apply behavior, and settings preview consistency
 - Added keyboard hotkey capture widgets so the GUI hotkey field can be set by pressing a key instead of typing it manually
 - Added GUI hover tips for settings, capture controls, search controls, archive workflows, and preset actions, plus README quick-start guidance for first-time GUI use
 - Added an offscreen PySide6 GUI smoke test that instantiates the main window and verifies the expected tab layout/status widgets
