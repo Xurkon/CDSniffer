@@ -25,7 +25,7 @@ from .correlator import (
     find_all_offsets,
 )
 from .format_analyzers import analyze_match_format, summarize_format_hints
-from .paz_archive import PazEntry, decode_entry_bytes, filter_archive_entries, load_archive_entries
+from .paz_archive import PazDecoderSample, PazEntry, decode_entry_bytes, filter_archive_entries, load_archive_entries
 
 
 ARCHIVE_INDEX_SCHEMA_VERSION = 1
@@ -267,6 +267,7 @@ def cache_decoded_entry(
     cache_dir: Path,
     *,
     decrypt_xml: bool = True,
+    decoder_samples: list[PazDecoderSample] | None = None,
 ) -> tuple[Path, bytes, dict[str, Any]]:
     key = entry.cache_key()
     suffix = _cache_suffix(entry.path)
@@ -278,7 +279,11 @@ def cache_decoded_entry(
         metadata.update({"from_cache": True, "cache_path": str(cache_path), "size": len(data)})
         return cache_path, data, metadata
 
-    data, decode_info = decode_entry_bytes(entry.to_paz_entry(), decrypt_xml=decrypt_xml)
+    data, decode_info = decode_entry_bytes(
+        entry.to_paz_entry(),
+        decrypt_xml=decrypt_xml,
+        decoder_samples=decoder_samples,
+    )
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_bytes(data)
     metadata = {
@@ -306,6 +311,7 @@ def correlate_capture_to_archive(
     context_bytes: int = 16,
     include_format_hints: bool = True,
     decrypt_xml: bool = True,
+    decoder_samples: list[PazDecoderSample] | None = None,
 ) -> dict[str, Any]:
     max_entries = max(1, max_entries)
     max_matches_per_evidence = max(1, max_matches_per_evidence)
@@ -326,7 +332,12 @@ def correlate_capture_to_archive(
             truncated = True
             break
         try:
-            cache_path, blob, cache_info = cache_decoded_entry(entry, cache_dir, decrypt_xml=decrypt_xml)
+            cache_path, blob, cache_info = cache_decoded_entry(
+                entry,
+                cache_dir,
+                decrypt_xml=decrypt_xml,
+                decoder_samples=decoder_samples,
+            )
             decoded_count += 1
             if cache_info.get("from_cache"):
                 cache_hit_count += 1

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import fnmatch
+import hashlib
 import json
 import os
 import struct
@@ -26,7 +27,6 @@ XOR_DELTAS = (
     0x02020202,
 )
 PASSTHROUGH_COMPRESSION_TYPES = {0, 1}
-DECOMPRESSION_TYPES = {2, 3, 4}
 KNOWN_DECODED_PREFIXES = (
     b"DDS ",
     b"PAR ",
@@ -78,7 +78,7 @@ class PazEntry:
 
     @property
     def needs_decompression(self) -> bool:
-        return self.compression_type in DECOMPRESSION_TYPES
+        return self.compression_type not in PASSTHROUGH_COMPRESSION_TYPES
 
     @property
     def encrypted(self) -> bool:
@@ -105,8 +105,113 @@ class PazEntry:
         }
 
 
+@dataclass(frozen=True)
+class PazDecoderSample:
+    name: str
+    compression_type: int
+    compressed_sha256: str
+    decoded_bytes: bytes
+    source_manifest: str
+    source_compressed: str
+    source_decoded: str
+
+
 def compression_name(value: int) -> str:
     return {0: "none", 1: "raw-asset", 2: "lz4", 3: "adaptive", 4: "zlib"}.get(value, f"unknown-{value}")
+
+
+def load_decoder_samples(sample_roots: list[Path] | None) -> list[PazDecoderSample]:
+    if not sample_roots:
+        return []
+    samples: list[PazDecoderSample] = []
+    for root in sample_roots:
+        manifest_path = _resolve_decoder_sample_manifest(Path(root))
+        samples.extend(_load_decoder_samples_from_manifest(manifest_path))
+    seen: dict[tuple[int, str], PazDecoderSample] = {}
+    for sample in samples:
+        key = (sample.compression_type, sample.compressed_sha256)
+        existing = seen.get(key)
+        if existing is not None and existing.decoded_bytes != sample.decoded_bytes:
+            raise ArchiveError(
+                "Conflicting decoder samples found for "
+                f"type {sample.compression_type} and hash {sample.compressed_sha256}"
+            )
+        seen[key] = sample
+    return list(seen.values())
+
+
+def _resolve_decoder_sample_manifest(root: Path) -> Path:
+    if root.is_file():
+        if root.suffix.lower() != ".json":
+            raise FileNotFoundError(f"Decoder sample manifest must be a JSON file or folder: {root}")
+        if not root.exists():
+            raise FileNotFoundError(f"Decoder sample manifest not found: {root}")
+        return root
+    if not root.exists():
+        raise FileNotFoundError(f"Decoder sample root not found: {root}")
+    if not root.is_dir():
+        raise FileNotFoundError(f"Decoder sample root is not a folder: {root}")
+    for candidate in (root / "decoder-samples.json", root / "paz-decoder-samples.json"):
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        f"Decoder sample manifest not found in {root}. Expected decoder-samples.json or paz-decoder-samples.json."
+    )
+
+
+def _load_decoder_samples_from_manifest(manifest_path: Path) -> list[PazDecoderSample]:
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("Decoder sample manifest must be a JSON object.")
+    samples = payload.get("samples", [])
+    if not isinstance(samples, list):
+        raise ValueError("Decoder sample manifest samples must be a list.")
+    decoded_samples: list[PazDecoderSample] = []
+    for index, item in enumerate(samples):
+        if not isinstance(item, dict):
+            raise ValueError(f"Decoder sample #{index + 1} must be an object.")
+        name = str(item.get("name", "")).strip()
+        if not name:
+            raise ValueError(f"Decoder sample #{index + 1} is missing a name.")
+        compression_type = int(item.get("compression_type"))
+        compressed_file = _resolve_sample_asset_path(manifest_path.parent, item, "compressed_file")
+        decoded_file = _resolve_sample_asset_path(manifest_path.parent, item, "decoded_file")
+        compressed_bytes = compressed_file.read_bytes()
+        decoded_bytes = decoded_file.read_bytes()
+        decoded_samples.append(
+            PazDecoderSample(
+                name=name,
+                compression_type=compression_type,
+                compressed_sha256=hashlib.sha256(compressed_bytes).hexdigest(),
+                decoded_bytes=decoded_bytes,
+                source_manifest=str(manifest_path),
+                source_compressed=str(compressed_file),
+                source_decoded=str(decoded_file),
+            )
+        )
+    return decoded_samples
+
+
+def _resolve_sample_asset_path(base_dir: Path, item: dict[str, Any], field: str) -> Path:
+    raw = str(item.get(field, "")).strip()
+    if not raw:
+        raise ValueError(f"Decoder sample is missing {field}.")
+    path = Path(raw)
+    return path if path.is_absolute() else base_dir / path
+
+
+def _match_decoder_sample(
+    data: bytes,
+    compression_type: int,
+    decoder_samples: list[PazDecoderSample] | None,
+) -> PazDecoderSample | None:
+    if not decoder_samples:
+        return None
+    data_hash = hashlib.sha256(data).hexdigest()
+    for sample in decoder_samples:
+        if sample.compression_type == compression_type and sample.compressed_sha256 == data_hash:
+            return sample
+    return None
 
 
 def discover_pamt_files(root: Path) -> list[Path]:
@@ -244,6 +349,7 @@ def extract_entries(
     dry_run: bool = False,
     validate_only: bool = False,
     overwrite: bool = True,
+    decoder_samples: list[PazDecoderSample] | None = None,
 ) -> dict[str, Any]:
     dry_run = dry_run or validate_only
     extracted: list[dict[str, Any]] = []
@@ -262,6 +368,7 @@ def extract_entries(
                     decrypt_xml=decrypt_xml,
                     overwrite=overwrite,
                     write_output=not dry_run,
+                    decoder_samples=decoder_samples,
                 )
                 if dry_run:
                     result["dry_run"] = True
@@ -294,6 +401,7 @@ def extract_entry(
     decrypt_xml: bool = True,
     overwrite: bool = True,
     write_output: bool = True,
+    decoder_samples: list[PazDecoderSample] | None = None,
 ) -> dict[str, Any]:
     paz_path = Path(entry.paz_file)
     if not paz_path.exists():
@@ -306,7 +414,7 @@ def extract_entry(
     if len(data) != read_size:
         raise ArchiveError(f"Short read for {entry.path}: expected {read_size}, got {len(data)}")
 
-    data, decode_info = decode_entry_bytes(entry, data, decrypt_xml=decrypt_xml)
+    data, decode_info = decode_entry_bytes(entry, data, decrypt_xml=decrypt_xml, decoder_samples=decoder_samples)
 
     out_path = safe_output_path(output_dir, entry.path)
     if write_output and out_path.exists() and not overwrite:
@@ -341,7 +449,13 @@ def read_entry_bytes(entry: PazEntry) -> bytes:
     return data
 
 
-def decode_entry_bytes(entry: PazEntry, data: bytes | None = None, *, decrypt_xml: bool = True) -> tuple[bytes, dict[str, Any]]:
+def decode_entry_bytes(
+    entry: PazEntry,
+    data: bytes | None = None,
+    *,
+    decrypt_xml: bool = True,
+    decoder_samples: list[PazDecoderSample] | None = None,
+) -> tuple[bytes, dict[str, Any]]:
     decoded = read_entry_bytes(entry) if data is None else data
     decrypted = False
     compression_decoder = "passthrough"
@@ -351,7 +465,12 @@ def decode_entry_bytes(entry: PazEntry, data: bytes | None = None, *, decrypt_xm
         decrypted = True
 
     if entry.needs_decompression:
-        decoded, compression_decoder = decode_compression(decoded, entry.compression_type, entry.orig_size)
+        decoded, compression_decoder = decode_compression(
+            decoded,
+            entry.compression_type,
+            entry.orig_size,
+            decoder_samples=decoder_samples,
+        )
 
     return decoded, {
         "size": len(decoded),
@@ -381,21 +500,44 @@ def decrypt(data: bytes, filename: str) -> bytes:
     return cipher.encryptor().update(data)
 
 
-def decompress(data: bytes, compression_type: int, original_size: int) -> bytes:
-    return decode_compression(data, compression_type, original_size)[0]
+def decompress(
+    data: bytes,
+    compression_type: int,
+    original_size: int,
+    *,
+    decoder_samples: list[PazDecoderSample] | None = None,
+) -> bytes:
+    return decode_compression(data, compression_type, original_size, decoder_samples=decoder_samples)[0]
 
 
-def decode_compression(data: bytes, compression_type: int, original_size: int) -> tuple[bytes, str]:
+def decode_compression(
+    data: bytes,
+    compression_type: int,
+    original_size: int,
+    *,
+    decoder_samples: list[PazDecoderSample] | None = None,
+) -> tuple[bytes, str]:
     if compression_type in PASSTHROUGH_COMPRESSION_TYPES:
         return data, "passthrough"
     if compression_type == 2:
         return _decode_lz4(data, original_size), "lz4"
     if compression_type == 3:
-        return _decode_adaptive(data, original_size)
+        try:
+            return _decode_adaptive(data, original_size)
+        except UnsupportedCompression:
+            sample = _match_decoder_sample(data, compression_type, decoder_samples)
+            if sample is not None:
+                _validate_original_size(sample.decoded_bytes, original_size, f"sample:{sample.name}")
+                return sample.decoded_bytes, f"sample:{sample.name}"
+            raise
     if compression_type == 4:
         decoded = zlib.decompress(data)
         _validate_original_size(decoded, original_size, "zlib")
         return decoded, "zlib"
+    sample = _match_decoder_sample(data, compression_type, decoder_samples)
+    if sample is not None:
+        _validate_original_size(sample.decoded_bytes, original_size, f"sample:{sample.name}")
+        return sample.decoded_bytes, f"sample:{sample.name}"
     raise UnsupportedCompression(f"Unsupported PAZ compression type {compression_type} ({compression_name(compression_type)})")
 
 

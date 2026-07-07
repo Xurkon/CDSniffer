@@ -38,6 +38,7 @@ from cd_sniffer.paz_archive import (
     extract_entries,
     filter_archive_entries,
     hashlittle,
+    load_decoder_samples,
     parse_pamt,
     PazEntry,
 )
@@ -631,6 +632,74 @@ class ScannerTests(unittest.TestCase):
 
         self.assertEqual(decoded, raw)
         self.assertEqual(decoder, "adaptive-lz4")
+
+    def test_decoder_samples_fallback_decodes_unknown_compression_type(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            compressed = b"\x01sample-compressed-payload"
+            decoded = b"sample decoded payload"
+            sample_dir = root / "samples"
+            sample_dir.mkdir()
+            (sample_dir / "sample.compressed.bin").write_bytes(compressed)
+            (sample_dir / "sample.decoded.bin").write_bytes(decoded)
+            (sample_dir / "decoder-samples.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "samples": [
+                            {
+                                "name": "custom-proprietary",
+                                "compression_type": 5,
+                                "compressed_file": "sample.compressed.bin",
+                                "decoded_file": "sample.decoded.bin",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            samples = load_decoder_samples([sample_dir])
+            result, decoder = decode_compression(compressed, 5, len(decoded), decoder_samples=samples)
+
+            self.assertEqual(result, decoded)
+            self.assertEqual(decoder, "sample:custom-proprietary")
+
+    def test_extract_entry_uses_decoder_samples_for_unknown_compression(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            decoded = b"decoded proprietary payload"
+            compressed = b"\x02compressed proprietary payload"
+            sample_dir = root / "samples"
+            sample_dir.mkdir()
+            (sample_dir / "sample.compressed.bin").write_bytes(compressed)
+            (sample_dir / "sample.decoded.bin").write_bytes(decoded)
+            (sample_dir / "decoder-samples.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "samples": [
+                            {
+                                "name": "custom-proprietary",
+                                "compression_type": 5,
+                                "compressed_file": "sample.compressed.bin",
+                                "decoded_file": "sample.decoded.bin",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            pamt = write_synthetic_pamt(root, "data/custom.bin", comp_size=len(compressed), orig_size=len(decoded), flags=(5 << 16))
+            (root / "0.paz").write_bytes(compressed)
+            entry = parse_pamt(pamt)[0]
+
+            samples = load_decoder_samples([sample_dir])
+            output = root / "out"
+            result = extract_entry(entry, output, decrypt_xml=False, decoder_samples=samples)
+
+            self.assertEqual(result["compression_decoder"], "sample:custom-proprietary")
+            self.assertEqual((output / "testpkg" / "data" / "custom.bin").read_bytes(), decoded)
 
     def test_paz_validate_dry_run_decodes_without_writing(self):
         with tempfile.TemporaryDirectory() as tmpdir:

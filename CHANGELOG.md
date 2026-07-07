@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added sample-pack decoder fallback support for future PAZ payloads by loading exact-match compressed/decoded samples from a manifest or folder
 - Added fail-fast validation for imported settings profiles so unsupported modes and invalid numeric ranges are rejected before capture starts
 - Added live capture-summary syncing so the GUI preview now updates when capture, filter, tray, or archive settings change
 - Added copyable error summaries, structured action logs for major GUI workflows, and a rollback-friendly last-good settings snapshot with restore support

@@ -269,6 +269,7 @@ Useful archive options:
 - `--archive-no-decrypt` extracts encrypted XML bytes without decrypting
 - `--archive-dry-run` previews extraction without writing decoded files
 - `--archive-validate` reads, decrypts, and decodes entries without writing decoded files
+- `--decoder-sample` loads exact-match sample packs for archive extraction
 - `--archive-format json|csv|markdown` controls report format
 - `--archive-report-output` writes the archive report to a file
 - `--validate-schemas` or `CDSNIFFER_VALIDATE_SCHEMAS=1` validates archive JSON payloads before output
@@ -282,6 +283,7 @@ Useful archive correlation options:
 - `--correlate-archive-term` limits candidate archive paths by substring and can be repeated
 - `--correlate-archive-max-entries` caps how many archive entries are decoded in one run
 - `--correlate-archive-no-decrypt` keeps XML payloads encrypted during archive correlation
+- `--decoder-sample` loads exact-match sample packs for archive correlation
 - `--correlate-max-matches`, `--correlate-max-matches-per-evidence`, `--correlate-context-bytes`, `--correlate-no-numeric`, `--correlate-no-format-hints`, `--correlate-format`, and `--correlate-output` also apply to archive correlation
 
 Archive decode notes:
@@ -289,8 +291,9 @@ Archive decode notes:
 - Compression type `0` is uncompressed pass-through.
 - Compression type `1` is treated as raw asset storage. Current 1.13 game files use this for `.dds`, `.pam`, `.pamlod`, and `.pac` assets; many of those entries intentionally have a stored size smaller than the logical asset size while already beginning with valid asset headers like `DDS ` or `PAR `.
 - Compression type `2` is LZ4 block data and needs `pip install .[unpack]`.
-- Compression type `3` uses adaptive decoding: CDSniffer tries raw, zlib, and LZ4 paths and records the decoder that worked. The current tested 1.13 install did not contain type `3` entries, so genuinely proprietary future samples will be reported instead of guessed.
+- Compression type `3` uses adaptive decoding: CDSniffer tries raw, zlib, and LZ4 paths and records the decoder that worked.
 - Compression type `4` is zlib and uses the Python standard library.
+- `--decoder-sample` can point to a folder or manifest containing exact-match decoder samples for future proprietary PAZ payloads. Each sample manifest is a JSON object with a `samples` array, and each sample points at a compressed source file plus the decoded bytes it should produce. When the compressed SHA-256 matches, CDSniffer reuses the learned decoded bytes and labels the decoder as `sample:<name>`.
 
 Correlate a capture against unpacked files:
 
@@ -517,7 +520,7 @@ Good next steps before opening this up more broadly:
 - [x] Harden the GUI state model so the preview, hotkey field, and capture settings stay consistent after edits and imports
 - [x] Make the archive workflow more resilient with preflight checks for index build, correlation, and selected-file comparison inputs
 - [x] Improve diagnostics with copyable error summaries, structured action logs, and a rollback-friendly last-good settings snapshot
-- [ ] Add sample-driven decoders for any future proprietary PAZ compression payloads that are not raw, zlib, or LZ4
+- [x] Add sample-driven decoders for any future proprietary PAZ compression payloads that are not raw, zlib, or LZ4
 - [ ] Add a build/release script for `cdsniffer.exe` and `cdsniffer-gui.exe`
 - [ ] Add a random session token to the localhost GUI IPC channel
 - [ ] Split the large GUI module into smaller files once the interface settles

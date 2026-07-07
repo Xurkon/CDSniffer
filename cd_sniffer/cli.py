@@ -60,6 +60,7 @@ from .dmm import (
 from .ipc import send_gui_command
 from .paz_archive import (
     build_archive_report,
+    load_decoder_samples,
     extract_entries,
     filter_archive_entries,
     load_archive_entries,
@@ -198,6 +199,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--archive-no-decrypt", action="store_true", help="Do not decrypt XML entries during archive extraction")
     parser.add_argument("--archive-dry-run", action="store_true", help="Show what would be extracted without writing files")
     parser.add_argument("--archive-validate", action="store_true", help="Read, decrypt, and decode matching archive entries without writing files")
+    parser.add_argument(
+        "--decoder-sample",
+        action="append",
+        dest="decoder_samples",
+        help="Decoder sample manifest or folder used as an exact-match fallback for future PAZ compression payloads",
+    )
     parser.add_argument("--validate-schemas", action="store_true", help="Validate generated JSON payloads against bundled schemas before writing or printing")
     return parser.parse_args()
 
@@ -205,6 +212,16 @@ def parse_args() -> argparse.Namespace:
 def validate_result_if_requested(args: argparse.Namespace, schema_name: str, payload: dict[str, Any]) -> None:
     if schema_validation_requested(bool(getattr(args, "validate_schemas", False))):
         validate_payload_schema(payload, schema_name)
+
+
+def load_optional_decoder_samples(args: argparse.Namespace) -> list[Any]:
+    sample_roots = [Path(item) for item in getattr(args, "decoder_samples", []) or []]
+    if not sample_roots:
+        return []
+    for sample_root in sample_roots:
+        if not sample_root.exists():
+            raise FileNotFoundError(f"Decoder sample path not found: {sample_root}")
+    return load_decoder_samples(sample_roots)
 
 
 def prepare_capture_payload(
@@ -261,6 +278,13 @@ def write_and_report_payload(args: argparse.Namespace, output_path: Path, payloa
 
 def main() -> int:
     args = parse_args()
+    decoder_samples: list[Any] | None = None
+
+    def get_decoder_samples() -> list[Any]:
+        nonlocal decoder_samples
+        if decoder_samples is None:
+            decoder_samples = load_optional_decoder_samples(args)
+        return decoder_samples
 
     if args.gui_command:
         payload: dict[str, Any] | None = None
@@ -420,6 +444,7 @@ def main() -> int:
                     decrypt_xml=not args.archive_no_decrypt,
                     dry_run=args.archive_dry_run or args.archive_validate,
                     validate_only=args.archive_validate,
+                    decoder_samples=get_decoder_samples(),
                 )
                 result["roots"] = [str(root) for root in archive_roots]
                 result["patterns"] = args.archive_filters or ["*"]
@@ -486,6 +511,7 @@ def main() -> int:
                 context_bytes=args.correlate_context_bytes,
                 include_format_hints=args.correlate_format_hints,
                 decrypt_xml=not args.correlate_archive_no_decrypt,
+                decoder_samples=get_decoder_samples(),
             )
         except Exception as exc:
             print(f"Archive correlation failed: {exc}")
