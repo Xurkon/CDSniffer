@@ -2042,6 +2042,7 @@ class MainWindow(QMainWindow):
         self.archive_correlation_table.horizontalHeader().setSectionResizeMode(8, QHeaderView.Stretch)
         self.archive_correlation_table.horizontalHeader().setSectionResizeMode(9, QHeaderView.Stretch)
         self.archive_correlation_table.setAlternatingRowColors(True)
+        self.archive_correlation_table.itemSelectionChanged.connect(self.update_match_preview_from_selection)
         correlation_layout.addWidget(QLabel("Correlation Matches"))
         correlation_layout.addWidget(self.archive_correlation_table)
         tables_splitter.addWidget(correlation_panel)
@@ -2053,14 +2054,21 @@ class MainWindow(QMainWindow):
         self.archive_report_view.setReadOnly(True)
         self.archive_report_view.setFont(QFont("Cascadia Mono", 10))
         splitter.addWidget(self.archive_report_view)
+        self.match_preview_view = QPlainTextEdit()
+        self.match_preview_view.setReadOnly(True)
+        self.match_preview_view.setFont(QFont("Cascadia Mono", 10))
+        self.match_preview_view.setPlainText("Select a correlation match to preview decoded bytes and patch context.")
+        splitter.addWidget(self.match_preview_view)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 1)
         layout.addWidget(splitter, 1)
 
         self.last_archive_index_report: dict[str, Any] | None = None
         self.last_archive_index_search: dict[str, Any] | None = None
         self.last_archive_correlation: dict[str, Any] | None = None
         self.last_file_correlation: dict[str, Any] | None = None
+        self.current_correlation_matches: list[dict[str, Any]] = []
 
     def archive_patterns(self, text: str) -> list[str]:
         return split_values(text)
@@ -2292,6 +2300,7 @@ class MainWindow(QMainWindow):
         self.last_archive_correlation = result
         self.last_file_correlation = None
         matches = list(result.get("matches", []))
+        self.current_correlation_matches = matches
         self.archive_summary_label.setText(
             f"Archive correlation found {result.get('match_count', 0)} matches from {result.get('candidate_entry_count', 0)} candidate entries. "
             f"Decoded {result.get('decoded_entry_count', 0)} entries with {result.get('cache_hit_count', 0)} cache hits."
@@ -2315,12 +2324,14 @@ class MainWindow(QMainWindow):
                 item.setToolTip(str(value))
                 self.archive_correlation_table.setItem(row_index, column, item)
         self.archive_report_view.setPlainText(render_archive_correlation_markdown(result))
+        self.match_preview_view.setPlainText("Select an archive correlation match to preview decoded bytes and patch context.")
         self.filter_archive_correlation_rows(self.archive_correlation_filter_edit.text())
 
     def render_file_correlation(self, result: dict[str, Any]) -> None:
         self.last_file_correlation = result
         self.last_archive_correlation = None
         matches = list(result.get("matches", []))
+        self.current_correlation_matches = matches
         selected = ", ".join(result.get("selected_files", [])) or result.get("root", "")
         self.archive_summary_label.setText(
             f"File correlation found {result.get('match_count', 0)} matches in {result.get('file_count', 0)} selected file(s)."
@@ -2344,7 +2355,95 @@ class MainWindow(QMainWindow):
                 item.setToolTip(str(value))
                 self.archive_correlation_table.setItem(row_index, column, item)
         self.archive_report_view.setPlainText(render_correlation_markdown(result))
+        self.match_preview_view.setPlainText("Select a file correlation match to preview decoded bytes and patch context.")
         self.filter_archive_correlation_rows(self.archive_correlation_filter_edit.text())
+
+    def update_match_preview_from_selection(self) -> None:
+        if not hasattr(self, "match_preview_view"):
+            return
+        row = self.archive_correlation_table.currentRow()
+        if row < 0 or row >= len(self.current_correlation_matches):
+            self.match_preview_view.setPlainText("Select a correlation match to preview decoded bytes and patch context.")
+            return
+        self.match_preview_view.setPlainText(self.build_match_preview(self.current_correlation_matches[row]))
+
+    def build_match_preview(self, match: dict[str, Any], *, radius: int = 96) -> str:
+        source_text = str(match.get("cache_path") or match.get("file") or "").strip()
+        source_file = Path(source_text) if source_text else Path()
+        offset = self.match_offset(match)
+        original = str(match.get("original_bytes", ""))
+        lines = [
+            "# Match Preview",
+            "",
+            f"Source: {source_text or '<unknown>'}",
+            f"Archive path: {match.get('archive_path', '<not archive-backed>')}",
+            f"Offset: {match.get('decoded_offset_hex') or match.get('offset_hex') or offset}",
+            f"Type: {match.get('match_type', '')}",
+            f"Evidence: {match.get('evidence_value', '')}",
+            f"Confidence: {match.get('confidence', '')}",
+            f"Reasons: {', '.join(str(item) for item in match.get('confidence_reasons', []))}",
+            "",
+            "Patch skeleton:",
+            json.dumps(match.get("patch_skeleton", {}), ensure_ascii=False, indent=2),
+            "",
+            f"Original bytes: {original}",
+        ]
+        preview = self.read_match_preview_bytes(source_file, offset, radius=radius)
+        if preview is None:
+            context_hex = str(match.get("context_hex", "")).strip()
+            if context_hex:
+                lines.extend(["", "Context hex from report:", context_hex])
+            else:
+                lines.extend(["", "No readable decoded/cache file or context bytes were available for this match."])
+            return "\n".join(lines)
+
+        start, blob = preview
+        lines.extend(
+            [
+                "",
+                f"Preview window: 0x{start:X} - 0x{start + len(blob):X}",
+                "",
+                "Hex:",
+                self.hex_dump(blob, base_offset=start),
+                "",
+                "Printable text:",
+                self.printable_preview(blob),
+            ]
+        )
+        return "\n".join(lines)
+
+    def match_offset(self, match: dict[str, Any]) -> int:
+        value = match.get("decoded_offset", match.get("offset", 0))
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def read_match_preview_bytes(self, source_file: Path, offset: int, *, radius: int) -> tuple[int, bytes] | None:
+        if not str(source_file) or not source_file.exists() or not source_file.is_file():
+            return None
+        try:
+            size = source_file.stat().st_size
+            start = max(0, offset - radius)
+            end = min(size, offset + radius)
+            with source_file.open("rb") as handle:
+                handle.seek(start)
+                return start, handle.read(max(0, end - start))
+        except OSError:
+            return None
+
+    def hex_dump(self, blob: bytes, *, base_offset: int = 0, width: int = 16) -> str:
+        rows: list[str] = []
+        for row_start in range(0, len(blob), width):
+            chunk = blob[row_start : row_start + width]
+            hex_part = " ".join(f"{byte:02X}" for byte in chunk)
+            ascii_part = "".join(chr(byte) if 32 <= byte <= 126 else "." for byte in chunk)
+            rows.append(f"{base_offset + row_start:08X}  {hex_part:<{width * 3}}  {ascii_part}")
+        return "\n".join(rows) if rows else "<empty>"
+
+    def printable_preview(self, blob: bytes) -> str:
+        text = "".join(chr(byte) if byte in {9, 10, 13} or 32 <= byte <= 126 else "." for byte in blob)
+        return text.strip() or "<no printable text>"
 
     def filter_archive_index_rows(self, text: str) -> None:
         self.filter_table_rows(self.archive_index_table, text)

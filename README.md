@@ -351,6 +351,7 @@ Use the GUI `Archives` tab:
 - Use archive correlation globs and path terms to narrow candidates before clicking `Run Archive Correlation`
 - Use `Decoded file` plus `Run File Correlation` when you want to compare the capture against one selected unpacked/cache file instead of an entire folder or archive index
 - Inspect the `Correlation Matches` table for confidence, decoded offset, evidence value, decoder, original bytes, cache path, and confidence reasons
+- Select a correlation row to preview the decoded/cache bytes around the offset, printable text, evidence metadata, and generic patch skeleton
 - Export the latest index summary or correlation report from the tab when sharing results
 
 ## Suggested workflow
@@ -427,14 +428,19 @@ python -m cd_sniffer --mode hotkey --hotkey F8 --window-title "Crimson Desert" -
 
 Good next steps before opening this up more broadly:
 
-- Add exact GUI smoke tests with the `PySide6` extra installed
-- Add DMM-specific patch emitters on top of the generic correlation patch skeletons
-- Expand format analyzers with deeper PASEQ, quest/mission table, hash, and typed record parsers
-- Add sample-driven decoders for any future proprietary PAZ compression payloads that are not raw, zlib, or LZ4
-- Add repeat-run confidence rollups across multiple target captures
-- Add a build/release script for `cdsniffer.exe` and `cdsniffer-gui.exe`
-- Add a random session token to the localhost GUI IPC channel
-- Split the large GUI module into smaller files once the interface settles
+- [x] Add archive/file match preview in the GUI so selecting a correlation row shows decoded bytes, printable text, offset metadata, and patch skeleton context
+- [ ] Add DMM-specific patch emitters on top of the generic correlation patch skeletons
+- [ ] Add a guided correlation workspace that walks users through capture selection, archive/folder/file comparison, baseline selection, and export format
+- [ ] Expand format analyzers with deeper PASEQ, quest/mission table, hash, and typed record parsers
+- [ ] Add repeat-run confidence rollups across multiple target captures
+- [ ] Add one-click extraction for the archive entry behind a selected archive correlation match
+- [ ] Add JSON schema validation gates through a `--validate-schemas` flag and optional environment variable
+- [ ] Add DMM conflict/overlap checking for generated patches against existing DMM mod JSON
+- [ ] Add exact GUI smoke tests with the `PySide6` extra installed
+- [ ] Add sample-driven decoders for any future proprietary PAZ compression payloads that are not raw, zlib, or LZ4
+- [ ] Add a build/release script for `cdsniffer.exe` and `cdsniffer-gui.exe`
+- [ ] Add a random session token to the localhost GUI IPC channel
+- [ ] Split the large GUI module into smaller files once the interface settles
 
 ## Notes
 

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added GUI correlation match previews that show decoded/cache bytes, printable text, offset metadata, and patch skeleton context for selected archive or file matches
 - Added the reviewed project audit report with maintainer follow-up notes and clarified README guidance for choosing archive, folder, or selected-file correlation
 - Added `--correlate-file`, GUI decoded-file selection, and an embedded-terminal `correlate-file` command for focused comparison against one selected unpacked/cache file
 - Added archive-correlation truncation metadata so reports indicate when raw or grouped matches were capped
