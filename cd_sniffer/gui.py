@@ -16,6 +16,7 @@ from typing import Any, Callable
 from .archive_index import (
     build_archive_index,
     correlate_capture_to_archive,
+    export_cached_archive_match,
     render_archive_correlation_csv,
     render_archive_correlation_markdown,
     render_archive_index_csv,
@@ -2019,6 +2020,8 @@ class MainWindow(QMainWindow):
         self.archive_correlate_button.clicked.connect(self.run_archive_correlation)
         self.archive_export_correlation_button = QPushButton("Export Correlation")
         self.archive_export_correlation_button.clicked.connect(self.export_archive_correlation)
+        self.archive_extract_match_button = QPushButton("Extract Selected Entry")
+        self.archive_extract_match_button.clicked.connect(self.extract_selected_archive_match)
         self.archive_export_dmm_button = QPushButton("Export DMM Draft")
         self.archive_export_dmm_button.clicked.connect(self.export_dmm_draft)
         self.archive_correlation_filter_edit = QLineEdit()
@@ -2059,7 +2062,8 @@ class MainWindow(QMainWindow):
         correlate_layout.addWidget(self.archive_correlate_file_button, 8, 1)
         correlate_layout.addWidget(self.archive_correlate_root_button, 8, 2)
         correlate_layout.addWidget(self.archive_export_correlation_button, 8, 3)
-        correlate_layout.addWidget(self.archive_export_dmm_button, 8, 4)
+        correlate_layout.addWidget(self.archive_extract_match_button, 8, 4)
+        correlate_layout.addWidget(self.archive_export_dmm_button, 8, 5)
         correlate_layout.addWidget(QLabel("Table filter"), 9, 0)
         correlate_layout.addWidget(self.archive_correlation_filter_edit, 9, 1, 1, 5)
         layout.addWidget(correlate_box)
@@ -2211,6 +2215,7 @@ class MainWindow(QMainWindow):
             "correlation_guide_run_button",
             "archive_export_index_button",
             "archive_export_correlation_button",
+            "archive_extract_match_button",
             "archive_export_dmm_button",
         ]:
             button = getattr(self, button_name, None)
@@ -2644,6 +2649,39 @@ class MainWindow(QMainWindow):
             self.append_log(f"Exported archive correlation results to {path}.")
         except Exception as exc:
             QMessageBox.warning(self, "Export Failed", str(exc))
+
+    def selected_correlation_match(self) -> dict[str, Any] | None:
+        row = self.archive_correlation_table.currentRow()
+        if row < 0 or row >= len(self.current_correlation_matches):
+            return None
+        return self.current_correlation_matches[row]
+
+    def extract_selected_archive_match(self) -> None:
+        if not self.last_archive_correlation:
+            QMessageBox.information(self, "No Archive Match", "Run archive correlation and select an archive-backed match first.")
+            return
+        match = self.selected_correlation_match()
+        if not match:
+            QMessageBox.information(self, "No Selection", "Select an archive correlation match to extract.")
+            return
+        if not match.get("cache_path") or not match.get("archive_path"):
+            QMessageBox.information(self, "Not Archive Backed", "The selected row does not include archive cache metadata.")
+            return
+        default_dir = str(Path(match.get("cache_path", "")).parent)
+        output_dir = QFileDialog.getExistingDirectory(self, "Extract Selected Archive Entry To", default_dir)
+        if not output_dir:
+            return
+        try:
+            result = export_cached_archive_match(match, Path(output_dir))
+        except Exception as exc:
+            QMessageBox.warning(self, "Extraction Failed", str(exc))
+            return
+        self.append_log(f"Extracted {result['archive_path']} to {result['output_path']}.")
+        QMessageBox.information(
+            self,
+            "Extraction Complete",
+            f"Decoded entry written to:\n{result['output_path']}\n\nMetadata written to:\n{result['metadata_path']}",
+        )
 
     def export_dmm_draft(self) -> None:
         result = self.last_archive_correlation or self.last_file_correlation

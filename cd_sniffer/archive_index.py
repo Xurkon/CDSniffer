@@ -4,6 +4,7 @@ import csv
 import fnmatch
 import hashlib
 import json
+import shutil
 import sqlite3
 from collections import Counter
 from contextlib import closing
@@ -79,6 +80,7 @@ class IndexedArchiveEntry:
         )
         return hashlib.sha256(identity.encode("utf-8", errors="replace")).hexdigest()
 
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -103,6 +105,57 @@ class IndexedArchiveEntry:
             "paz_size": self.paz_size,
             "cache_key": self.cache_key(),
         }
+
+
+def archive_match_output_path(output_dir: Path, archive_path: str, fallback_name: str) -> Path:
+    normalized = archive_path.replace("\\", "/").strip()
+    raw_parts = [part.strip() for part in normalized.split("/") if part.strip() and part.strip() not in {".", ".."}]
+    if any(":" in part for part in raw_parts):
+        raise ValueError(f"Archive path contains an unsafe drive or stream marker: {archive_path}")
+    safe_parts = raw_parts
+    if not safe_parts:
+        safe_parts = [fallback_name or "decoded-entry.bin"]
+    target = output_dir.joinpath(*safe_parts)
+    output_root = output_dir.resolve()
+    resolved_target = target.resolve()
+    if output_root != resolved_target and output_root not in resolved_target.parents:
+        raise ValueError(f"Archive path would escape output directory: {archive_path}")
+    return target
+
+
+def export_cached_archive_match(match: dict[str, Any], output_dir: Path, *, overwrite: bool = True) -> dict[str, Any]:
+    cache_text = str(match.get("cache_path") or "").strip()
+    if not cache_text:
+        raise ValueError("Selected match does not include a decoded cache path")
+    cache_path = Path(cache_text)
+    if not cache_path.exists() or not cache_path.is_file():
+        raise FileNotFoundError(f"Decoded cache file not found: {cache_path}")
+    archive_path = str(match.get("archive_path") or cache_path.name)
+    target_path = archive_match_output_path(output_dir, archive_path, cache_path.name)
+    if target_path.exists() and not overwrite:
+        raise FileExistsError(f"Output file already exists: {target_path}")
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(cache_path, target_path)
+    sidecar_path = target_path.with_suffix(target_path.suffix + ".cdsniffer.json")
+    metadata = {
+        "source": "archive-correlation-cache",
+        "archive_path": archive_path,
+        "cache_path": str(cache_path),
+        "output_path": str(target_path),
+        "decoded_offset": match.get("decoded_offset"),
+        "decoded_offset_hex": match.get("decoded_offset_hex"),
+        "archive_offset": match.get("archive_offset"),
+        "archive_offset_hex": match.get("archive_offset_hex"),
+        "paz_file": match.get("paz_file"),
+        "pamt_file": match.get("pamt_file"),
+        "compression_name": match.get("compression_name"),
+        "compression_decoder": match.get("compression_decoder"),
+        "decrypted": match.get("decrypted"),
+        "decompressed": match.get("decompressed"),
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+    }
+    sidecar_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"output_path": str(target_path), "metadata_path": str(sidecar_path), "archive_path": archive_path}
 
 
 def build_archive_index(

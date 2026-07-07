@@ -35,6 +35,7 @@ For compiled releases, the clean target is two executables:
 - Can parse PAMT indexes and extract/validate/decode PAZ archive entries without launching an external unpacker
 - Can build a reusable SQLite PAMT/PAZ archive index for fast repeated lookups after a game patch
 - Can correlate captures directly against indexed archive entries with a lazy decoded-entry cache
+- Can export the decoded cache file behind a selected archive correlation match from the GUI
 - Provides a dedicated GUI `Archives` tab for building/searching archive indexes and viewing archive correlation matches
 - Can gate captures until camp mission UI sentinel strings are present in memory
 - Can write only new unique hit text values during a capture session
@@ -371,6 +372,7 @@ Use the GUI `Archives` tab:
 - Use `Decoded root`, optional `Baseline`, and `Run Folder Correlation` when you want to compare a capture against a decoded folder tree and optionally rank target-only before/after candidates
 - Inspect the `Correlation Matches` table for confidence, decoded offset, evidence value, decoder, original bytes, cache path, and confidence reasons
 - Select a correlation row to preview the decoded/cache bytes around the offset, printable text, evidence metadata, and generic patch skeleton
+- Click `Extract Selected Entry` to copy the decoded cache file behind an archive correlation match into a chosen folder, preserving the archive-relative path and writing a `.cdsniffer.json` metadata sidecar
 - Click `Export DMM Draft` after correlation to write a review-required DMM patch JSON draft with grouped `game_file` and `changes` entries
 - Export the latest index summary or correlation report from the tab when sharing results
 
@@ -453,7 +455,7 @@ Good next steps before opening this up more broadly:
 - [x] Add a guided correlation workspace that walks users through capture selection, archive/folder/file comparison, baseline selection, and export format
 - [x] Expand format analyzers with deeper PASEQ, quest/mission table, hash, and typed record parsers
 - [x] Add repeat-run confidence rollups across multiple target captures
-- [ ] Add one-click extraction for the archive entry behind a selected archive correlation match
+- [x] Add one-click extraction for the archive entry behind a selected archive correlation match
 - [ ] Add JSON schema validation gates through a `--validate-schemas` flag and optional environment variable
 - [ ] Add DMM conflict/overlap checking for generated patches against existing DMM mod JSON
 - [ ] Add exact GUI smoke tests with the `PySide6` extra installed

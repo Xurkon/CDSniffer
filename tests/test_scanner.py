@@ -14,6 +14,7 @@ from cd_sniffer.cli import build_comparison, load_signature_pack, timestamped_ou
 from cd_sniffer.archive_index import (
     build_archive_index,
     correlate_capture_to_archive,
+    export_cached_archive_match,
     render_archive_correlation_markdown,
     select_archive_entries,
 )
@@ -726,6 +727,41 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(result["raw_match_limit"], 4)
         self.assertEqual(result["truncated_at_raw_match_count"], 4)
         self.assertEqual(result["match_count"], 1)
+
+    def test_export_cached_archive_match_writes_decoded_file_and_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            cache = root / "cache" / "decoded.bin"
+            output = root / "exported"
+            cache.parent.mkdir()
+            cache.write_bytes(b"decoded payload")
+            result = export_cached_archive_match(
+                {
+                    "archive_path": "sequencer/binary__/mission/test.paseq",
+                    "cache_path": str(cache),
+                    "decoded_offset": 12,
+                    "decoded_offset_hex": "0xC",
+                    "paz_file": "data0001.paz",
+                    "compression_decoder": "raw",
+                },
+                output,
+            )
+
+            output_path = Path(result["output_path"])
+            metadata_path = Path(result["metadata_path"])
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            self.assertEqual(output_path.read_bytes(), b"decoded payload")
+            self.assertTrue(str(output_path).endswith("sequencer\\binary__\\mission\\test.paseq"))
+            self.assertEqual(metadata["archive_path"], "sequencer/binary__/mission/test.paseq")
+            self.assertEqual(metadata["decoded_offset"], 12)
+
+    def test_export_cached_archive_match_rejects_escaped_output_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            cache = root / "cache.bin"
+            cache.write_bytes(b"decoded payload")
+            with self.assertRaises(ValueError):
+                export_cached_archive_match({"archive_path": "C:/outside/file.paseq", "cache_path": str(cache)}, root / "out")
 
     def test_dmm_patch_draft_groups_correlation_matches(self):
         result = {
