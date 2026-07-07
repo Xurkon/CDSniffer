@@ -316,6 +316,20 @@ def normalize_hotkey_name(value: Any) -> str:
     return hotkey
 
 
+def require_path(value: str, label: str, *, kind: str = "path") -> Path:
+    text = str(value).strip()
+    if not text:
+        raise ValueError(f"{label} is required.")
+    path = Path(text)
+    if not path.exists():
+        raise FileNotFoundError(f"{label} not found: {path}")
+    if kind == "file" and not path.is_file():
+        raise ValueError(f"{label} must be a file: {path}")
+    if kind == "dir" and not path.is_dir():
+        raise ValueError(f"{label} must be a folder: {path}")
+    return path
+
+
 class HotkeyLineEdit(QLineEdit):
     def __init__(self, text: str = "") -> None:
         super().__init__(text)
@@ -2477,17 +2491,17 @@ class MainWindow(QMainWindow):
         self.archive_task_thread.start()
 
     def run_archive_index_build(self) -> None:
-        root = Path(self.archive_root_edit.text().strip())
-        db_path = Path(self.archive_index_db_edit.text().strip())
-        if not root.exists():
-            QMessageBox.warning(self, "Missing Archive Root", f"Archive root not found: {root}")
-            return
-        if not str(db_path).strip():
-            QMessageBox.warning(self, "Missing Index DB", "Choose an index database path.")
-            return
-        paz_dir_text = self.archive_paz_dir_edit.text().strip()
-        if paz_dir_text and not Path(paz_dir_text).exists():
-            QMessageBox.warning(self, "Missing PAZ Directory", f"PAZ directory not found: {paz_dir_text}")
+        try:
+            root = require_path(self.archive_root_edit.text(), "Archive root", kind="dir")
+            db_text = self.archive_index_db_edit.text().strip()
+            if not db_text:
+                raise ValueError("Index DB is required.")
+            db_path = Path(db_text)
+            paz_dir_text = self.archive_paz_dir_edit.text().strip()
+            if paz_dir_text:
+                require_path(paz_dir_text, "PAZ directory", kind="dir")
+        except (ValueError, FileNotFoundError) as exc:
+            QMessageBox.warning(self, "Archive Preflight Failed", str(exc))
             return
         limit = int(self.archive_index_limit_spin.value()) or None
         self.start_archive_task(
@@ -2502,9 +2516,10 @@ class MainWindow(QMainWindow):
         )
 
     def run_archive_index_search(self) -> None:
-        db_path = Path(self.archive_index_db_edit.text().strip())
-        if not db_path.exists():
-            QMessageBox.warning(self, "Missing Index DB", f"Archive index not found: {db_path}")
+        try:
+            db_path = require_path(self.archive_index_db_edit.text(), "Archive index DB", kind="file")
+        except (ValueError, FileNotFoundError) as exc:
+            QMessageBox.warning(self, "Archive Preflight Failed", str(exc))
             return
         self.start_archive_task(
             "search-index",
@@ -2517,14 +2532,20 @@ class MainWindow(QMainWindow):
         )
 
     def run_archive_correlation(self) -> None:
-        capture_path = Path(self.archive_capture_edit.text().strip())
-        db_path = Path(self.archive_index_db_edit.text().strip())
-        cache_dir = Path(self.archive_cache_dir_edit.text().strip())
-        if not capture_path.exists():
-            QMessageBox.warning(self, "Missing Capture", f"Capture file not found: {capture_path}")
-            return
-        if not db_path.exists():
-            QMessageBox.warning(self, "Missing Index DB", f"Archive index not found: {db_path}")
+        try:
+            capture_path = require_path(self.archive_capture_edit.text(), "Capture file", kind="file")
+            db_path = require_path(self.archive_index_db_edit.text(), "Archive index DB", kind="file")
+            cache_dir = Path(self.archive_cache_dir_edit.text().strip())
+            if not str(cache_dir).strip():
+                raise ValueError("Cache dir is required.")
+            if cache_dir.exists() and not cache_dir.is_dir():
+                raise ValueError(f"Cache dir must be a folder: {cache_dir}")
+            if not cache_dir.exists():
+                cache_dir.mkdir(parents=True, exist_ok=True)
+            if self.archive_baseline_capture_edit.text().strip():
+                require_path(self.archive_baseline_capture_edit.text(), "Baseline capture file", kind="file")
+        except (ValueError, FileNotFoundError, OSError) as exc:
+            QMessageBox.warning(self, "Archive Preflight Failed", str(exc))
             return
         self.start_archive_task(
             "correlate-archive",
@@ -2545,13 +2566,11 @@ class MainWindow(QMainWindow):
         )
 
     def run_selected_file_correlation(self) -> None:
-        capture_path = Path(self.archive_capture_edit.text().strip())
-        selected_file = Path(self.archive_selected_file_edit.text().strip())
-        if not capture_path.exists():
-            QMessageBox.warning(self, "Missing Capture", f"Capture file not found: {capture_path}")
-            return
-        if not selected_file.exists() or not selected_file.is_file():
-            QMessageBox.warning(self, "Missing Decoded File", f"Decoded/unpacked file not found: {selected_file}")
+        try:
+            capture_path = require_path(self.archive_capture_edit.text(), "Capture file", kind="file")
+            selected_file = require_path(self.archive_selected_file_edit.text(), "Decoded/unpacked file", kind="file")
+        except (ValueError, FileNotFoundError) as exc:
+            QMessageBox.warning(self, "Archive Preflight Failed", str(exc))
             return
         self.start_archive_task(
             "correlate-file",
@@ -2567,17 +2586,14 @@ class MainWindow(QMainWindow):
         )
 
     def run_root_correlation(self) -> None:
-        capture_path = Path(self.archive_capture_edit.text().strip())
-        root_path = Path(self.archive_correlation_root_edit.text().strip())
-        baseline_text = self.archive_baseline_capture_edit.text().strip()
-        if not capture_path.exists():
-            QMessageBox.warning(self, "Missing Capture", f"Capture file not found: {capture_path}")
-            return
-        if baseline_text and not Path(baseline_text).exists():
-            QMessageBox.warning(self, "Missing Baseline", f"Baseline capture file not found: {baseline_text}")
-            return
-        if not root_path.exists() or not root_path.is_dir():
-            QMessageBox.warning(self, "Missing Decoded Root", f"Decoded/unpacked folder not found: {root_path}")
+        try:
+            capture_path = require_path(self.archive_capture_edit.text(), "Capture file", kind="file")
+            root_path = require_path(self.archive_correlation_root_edit.text(), "Decoded/unpacked folder", kind="dir")
+            baseline_text = self.archive_baseline_capture_edit.text().strip()
+            if baseline_text:
+                require_path(baseline_text, "Baseline capture file", kind="file")
+        except (ValueError, FileNotFoundError) as exc:
+            QMessageBox.warning(self, "Archive Preflight Failed", str(exc))
             return
         self.start_archive_task(
             "correlate-root",

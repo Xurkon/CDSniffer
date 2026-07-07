@@ -515,7 +515,7 @@ Good next steps before opening this up more broadly:
 - [ ] Validate more inputs before they reach capture/correlation so bad hotkeys, paths, and imported settings fail fast
 - [ ] Add more headless tests for settings round-trips, GUI profile import/export, and CLI/GUI defaults parity
 - [ ] Harden the GUI state model so the preview, hotkey field, and capture settings stay consistent after edits and imports
-- [ ] Make the archive workflow more resilient with preflight checks for index build, correlation, and selected-file comparison inputs
+- [x] Make the archive workflow more resilient with preflight checks for index build, correlation, and selected-file comparison inputs
 - [ ] Improve diagnostics with copyable error summaries, structured action logs, and a rollback-friendly last-good settings snapshot
 - [ ] Add sample-driven decoders for any future proprietary PAZ compression payloads that are not raw, zlib, or LZ4
 - [ ] Add a build/release script for `cdsniffer.exe` and `cdsniffer-gui.exe`

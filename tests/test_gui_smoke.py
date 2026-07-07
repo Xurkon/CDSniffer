@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -14,12 +15,13 @@ try:
     from PySide6.QtGui import QKeyEvent
     from PySide6.QtWidgets import QApplication
 
-    from cd_sniffer.gui import HotkeyLineEdit, MainWindow, SettingsDialog
+    from cd_sniffer.gui import HotkeyLineEdit, MainWindow, SettingsDialog, require_path
 except Exception as exc:  # pragma: no cover - depends on optional GUI extra
     QApplication = None  # type: ignore[assignment]
     MainWindow = None  # type: ignore[assignment]
     SettingsDialog = None  # type: ignore[assignment]
     HotkeyLineEdit = None  # type: ignore[assignment]
+    require_path = None  # type: ignore[assignment]
     GUI_IMPORT_ERROR = exc
 else:
     GUI_IMPORT_ERROR = None
@@ -130,6 +132,38 @@ class GuiSmokeTests(unittest.TestCase):
             finally:
                 source.close()
                 target.close()
+                app.processEvents()
+
+    def test_require_path_validates_missing_and_existing_inputs(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            file_path = root / "capture.jsonl"
+            file_path.write_text("{}", encoding="utf-8")
+            self.assertEqual(require_path(str(file_path), "Capture file", kind="file"), file_path)
+            self.assertEqual(require_path(str(root), "Archive root", kind="dir"), root)
+            with self.assertRaises(FileNotFoundError):
+                require_path(str(root / "missing.json"), "Capture file", kind="file")
+            with self.assertRaises(ValueError):
+                require_path(str(file_path), "Archive root", kind="dir")
+
+    def test_archive_selected_file_preflight_blocks_missing_file(self):
+        app = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+            capture_path = tmp / "capture.jsonl"
+            capture_path.write_text("{}", encoding="utf-8")
+            window = MainWindow()
+            try:
+                window.archive_capture_edit.setText(str(capture_path))
+                window.archive_selected_file_edit.setText(str(tmp / "missing.paseq"))
+                with patch("cd_sniffer.gui.QMessageBox.warning") as warning, patch.object(window, "start_archive_task") as start_task:
+                    window.run_selected_file_correlation()
+                start_task.assert_not_called()
+                warning.assert_called_once()
+                self.assertIn("Archive Preflight Failed", warning.call_args.args[1])
+                self.assertIn("not found", warning.call_args.args[2])
+            finally:
+                window.close()
                 app.processEvents()
 
 

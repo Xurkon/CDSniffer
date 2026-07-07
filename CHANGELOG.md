@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added archive workflow preflight checks for archive roots, index DBs, cache folders, baseline captures, and selected decoded files
 - Added file-backed GUI settings profile helpers plus round-trip smoke coverage for export/import and normalized hotkeys
 - Hardened GUI hotkey handling with normalized validation, atomic import/apply behavior, and settings preview consistency
 - Added keyboard hotkey capture widgets so the GUI hotkey field can be set by pressing a key instead of typing it manually
