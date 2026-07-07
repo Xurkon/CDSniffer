@@ -23,6 +23,7 @@ from .archive_index import (
     select_archive_entries,
 )
 from .correlator import correlate_capture_to_files, render_correlation_csv, render_correlation_markdown
+from .dmm import render_dmm_patch_draft
 
 try:
     from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
@@ -1967,6 +1968,8 @@ class MainWindow(QMainWindow):
         self.archive_correlate_button.clicked.connect(self.run_archive_correlation)
         self.archive_export_correlation_button = QPushButton("Export Correlation")
         self.archive_export_correlation_button.clicked.connect(self.export_archive_correlation)
+        self.archive_export_dmm_button = QPushButton("Export DMM Draft")
+        self.archive_export_dmm_button.clicked.connect(self.export_dmm_draft)
         self.archive_correlation_filter_edit = QLineEdit()
         self.archive_correlation_filter_edit.setPlaceholderText("Filter correlation result rows...")
         self.archive_correlation_filter_edit.textChanged.connect(self.filter_archive_correlation_rows)
@@ -1997,7 +2000,8 @@ class MainWindow(QMainWindow):
         correlate_layout.addWidget(self.archive_correlation_format_combo, 5, 5)
         correlate_layout.addWidget(self.archive_correlate_button, 6, 0, 1, 2)
         correlate_layout.addWidget(self.archive_correlate_file_button, 6, 2, 1, 2)
-        correlate_layout.addWidget(self.archive_export_correlation_button, 6, 4, 1, 2)
+        correlate_layout.addWidget(self.archive_export_correlation_button, 6, 4)
+        correlate_layout.addWidget(self.archive_export_dmm_button, 6, 5)
         correlate_layout.addWidget(QLabel("Table filter"), 7, 0)
         correlate_layout.addWidget(self.archive_correlation_filter_edit, 7, 1, 1, 5)
         layout.addWidget(correlate_box)
@@ -2110,6 +2114,7 @@ class MainWindow(QMainWindow):
             "archive_correlate_file_button",
             "archive_export_index_button",
             "archive_export_correlation_button",
+            "archive_export_dmm_button",
         ]:
             button = getattr(self, button_name, None)
             if button is not None:
@@ -2509,6 +2514,22 @@ class MainWindow(QMainWindow):
             self.append_log(f"Exported archive correlation results to {path}.")
         except Exception as exc:
             QMessageBox.warning(self, "Export Failed", str(exc))
+
+    def export_dmm_draft(self) -> None:
+        result = self.last_archive_correlation or self.last_file_correlation
+        if not result:
+            QMessageBox.information(self, "No Correlation Results", "Run archive or file correlation first.")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Export DMM Draft", "cdsniffer-dmm-draft.json", "DMM JSON (*.json);;All Files (*.*)")
+        if not path:
+            return
+        try:
+            rendered = render_dmm_patch_draft(result)
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).write_text(rendered, encoding="utf-8")
+            self.append_log(f"Exported DMM draft to {path}. Review patched values before using it in DMM.")
+        except Exception as exc:
+            QMessageBox.warning(self, "DMM Export Failed", str(exc))
 
     def build_log_tab(self) -> None:
         layout = QVBoxLayout(self.log_tab)

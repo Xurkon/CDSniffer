@@ -265,6 +265,12 @@ Correlate a baseline/target pair against unpacked files:
 python -m cd_sniffer --correlate-baseline logs\before-camp-ui.jsonl --correlate-target logs\camp-ui-open.jsonl --correlate-root D:\Documents\CrimsonDesertMods\unpacked --correlate-glob *.json --correlate-glob *.paseq --correlate-format markdown --correlate-output logs\correlation-diff.md
 ```
 
+Export a DMM byte-patch draft from a JSON correlation report:
+
+```powershell
+python -m cd_sniffer --dmm-export logs\archive-correlation.json --dmm-output logs\cdsniffer-dmm-draft.json --dmm-title "My Patch Draft" --dmm-author "YourName"
+```
+
 How unpacking, decoding, and comparison fit together:
 
 - `--archive-list` only reads PAMT metadata and helps you find candidate archive paths.
@@ -273,6 +279,7 @@ How unpacking, decoding, and comparison fit together:
 - `--correlate-archive` compares a capture against indexed archive entries directly; it lazily decodes candidates into `--correlate-archive-cache` and reports each decoded cache path.
 - `--correlate-root` scans a whole unpacked/decoded folder tree.
 - `--correlate-file` scans only the selected decoded/unpacked file, which is best when the archive report or manual review already gave you one likely target.
+- `--dmm-export` converts a JSON correlation report into a DMM-style byte-patch draft. It keeps `patched` values blank by default, so every change must be reviewed and completed before use.
 
 Choosing the right comparison mode:
 
@@ -297,6 +304,7 @@ Useful correlation options:
 - `--correlate-no-format-hints` skips JSON/text/binary analyzers for a faster raw-byte pass
 - `--correlate-format json|csv|markdown` controls the report format
 - `--correlate-output` writes the report to a file
+- `--dmm-export`, `--dmm-output`, `--dmm-title`, `--dmm-author`, `--dmm-version`, and `--dmm-patched-placeholder` control DMM draft export
 
 Correlation results include:
 
@@ -352,6 +360,7 @@ Use the GUI `Archives` tab:
 - Use `Decoded file` plus `Run File Correlation` when you want to compare the capture against one selected unpacked/cache file instead of an entire folder or archive index
 - Inspect the `Correlation Matches` table for confidence, decoded offset, evidence value, decoder, original bytes, cache path, and confidence reasons
 - Select a correlation row to preview the decoded/cache bytes around the offset, printable text, evidence metadata, and generic patch skeleton
+- Click `Export DMM Draft` after correlation to write a review-required DMM patch JSON draft with grouped `game_file` and `changes` entries
 - Export the latest index summary or correlation report from the tab when sharing results
 
 ## Suggested workflow
@@ -429,7 +438,7 @@ python -m cd_sniffer --mode hotkey --hotkey F8 --window-title "Crimson Desert" -
 Good next steps before opening this up more broadly:
 
 - [x] Add archive/file match preview in the GUI so selecting a correlation row shows decoded bytes, printable text, offset metadata, and patch skeleton context
-- [ ] Add DMM-specific patch emitters on top of the generic correlation patch skeletons
+- [x] Add DMM-specific patch emitters on top of the generic correlation patch skeletons
 - [ ] Add a guided correlation workspace that walks users through capture selection, archive/folder/file comparison, baseline selection, and export format
 - [ ] Expand format analyzers with deeper PASEQ, quest/mission table, hash, and typed record parsers
 - [ ] Add repeat-run confidence rollups across multiple target captures

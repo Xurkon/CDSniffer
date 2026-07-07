@@ -50,6 +50,7 @@ from .core import (
     write_rendered_snapshot,
     write_snapshot,
 )
+from .dmm import load_correlation_result, render_dmm_patch_draft
 from .ipc import send_gui_command
 from .paz_archive import (
     build_archive_report,
@@ -157,6 +158,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--correlate-no-format-hints", action="store_false", dest="correlate_format_hints", default=True, help="Skip JSON/text/binary format hints during correlation")
     parser.add_argument("--correlate-format", choices=["json", "csv", "markdown"], default="json", help="Format used for correlation results")
     parser.add_argument("--correlate-output", help="Optional file path to write correlation results instead of printing them")
+    parser.add_argument("--dmm-export", help="Correlation JSON report to convert into a DMM byte-patch draft")
+    parser.add_argument("--dmm-output", help="Output path for --dmm-export")
+    parser.add_argument("--dmm-title", default="CDSniffer Patch Draft", help="DMM draft mod title")
+    parser.add_argument("--dmm-version", default="0.1.0", help="DMM draft mod version")
+    parser.add_argument("--dmm-author", default="CDSniffer", help="DMM draft mod author")
+    parser.add_argument("--dmm-patched-placeholder", default="", help="Placeholder hex string for each DMM patched value")
     parser.add_argument("--correlate-archive", help="Capture JSON/JSONL file to correlate against indexed PAMT/PAZ archive entries")
     parser.add_argument("--correlate-archive-index", help="Archive index database to use; defaults to --archive-index-db")
     parser.add_argument("--correlate-archive-cache", default="logs/archive-cache", help="Decoded archive cache directory for archive correlation")
@@ -261,6 +268,32 @@ def main() -> int:
 
     if args.list_windows:
         return list_windows(args)
+
+    if args.dmm_export:
+        source_path = Path(args.dmm_export)
+        if not source_path.exists():
+            print(f"Correlation report not found: {source_path}")
+            return 1
+        try:
+            result = load_correlation_result(source_path)
+            rendered = render_dmm_patch_draft(
+                result,
+                title=args.dmm_title,
+                version=args.dmm_version,
+                author=args.dmm_author,
+                patched_placeholder=args.dmm_patched_placeholder,
+            )
+        except Exception as exc:
+            print(f"DMM export failed: {exc}")
+            return 1
+        if args.dmm_output:
+            out_path = Path(args.dmm_output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(rendered, encoding="utf-8")
+            print(json.dumps({"written": str(out_path), "format": "dmm-draft"}, ensure_ascii=False, indent=2))
+        else:
+            print(rendered, end="")
+        return 0
 
     if args.archive_index:
         if not args.archive_roots:

@@ -23,6 +23,7 @@ from cd_sniffer.correlator import (
     render_correlation_csv,
     render_correlation_markdown,
 )
+from cd_sniffer.dmm import build_dmm_patch_draft, render_dmm_patch_draft
 from cd_sniffer.paz_archive import (
     build_archive_report,
     decode_compression,
@@ -677,6 +678,42 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(result["raw_match_limit"], 4)
         self.assertEqual(result["truncated_at_raw_match_count"], 4)
         self.assertEqual(result["match_count"], 1)
+
+    def test_dmm_patch_draft_groups_correlation_matches(self):
+        result = {
+            "capture_path": "logs/capture.jsonl",
+            "matches": [
+                {
+                    "archive_path": "sequencer/test_a.paseq",
+                    "decoded_offset": 12,
+                    "match_type": "hit-bytes",
+                    "evidence_value": "Mission_A",
+                    "confidence": 0.98,
+                    "original_bytes": "aa bb cc dd",
+                },
+                {
+                    "relative_file": "tables/test_b.json",
+                    "offset": 4,
+                    "match_type": "text:ascii",
+                    "evidence_value": "Mission_B",
+                    "confidence": 0.87,
+                    "patch_skeleton": {"original": "11 22", "offset": 4, "file": "tables/test_b.json"},
+                },
+            ],
+        }
+
+        draft = build_dmm_patch_draft(result, title="Test Draft", author="Tester")
+        rendered = render_dmm_patch_draft(result, title="Test Draft", author="Tester")
+
+        self.assertEqual(draft["modinfo"]["title"], "Test Draft")
+        self.assertEqual(draft["modinfo"]["author"], "Tester")
+        self.assertEqual(draft["cdsniffer"]["exported_change_count"], 2)
+        self.assertEqual(len(draft["patches"]), 2)
+        first_change = draft["patches"][0]["changes"][0]
+        self.assertEqual(first_change["offset"], 12)
+        self.assertEqual(first_change["original"], "AABBCCDD")
+        self.assertEqual(first_change["patched"], "")
+        self.assertIn('"patches"', rendered)
 
     def test_paz_hashlittle_uses_documented_vector(self):
         self.assertEqual(hashlittle(b"rendererconfigurationmaterial.xml", 0x000C5EDE), 0xAF3DCEF3)
