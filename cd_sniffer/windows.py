@@ -247,6 +247,25 @@ def list_process_modules(handle: int) -> list[dict[str, object]]:
     return sorted(results, key=lambda item: int(item["base_address"]))
 
 
+def get_process_identity(pid: int) -> dict[str, str] | None:
+    try:
+        handle = open_process(pid)
+    except Exception:
+        return None
+    try:
+        modules = list_process_modules(handle)
+    finally:
+        close_handle(handle)
+    if not modules:
+        return None
+    primary = modules[0]
+    name = str(primary.get("name") or "").strip()
+    path = str(primary.get("path") or "").strip()
+    if not name and not path:
+        return None
+    return {"name": name, "path": path}
+
+
 def enum_windows() -> list[tuple[int, str]]:
     results: list[tuple[int, str]] = []
 

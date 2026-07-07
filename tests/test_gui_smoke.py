@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import sys
+import argparse
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -18,6 +19,7 @@ try:
     from PySide6.QtWidgets import QApplication
 
     from cd_sniffer.cli import parse_args
+    from cd_sniffer.core import collect_matching_windows
     from cd_sniffer.gui import HotkeyLineEdit, MainWindow, SettingsDialog, require_path
 except Exception as exc:  # pragma: no cover - depends on optional GUI extra
     QApplication = None  # type: ignore[assignment]
@@ -26,6 +28,7 @@ except Exception as exc:  # pragma: no cover - depends on optional GUI extra
     HotkeyLineEdit = None  # type: ignore[assignment]
     require_path = None  # type: ignore[assignment]
     parse_args = None  # type: ignore[assignment]
+    collect_matching_windows = None  # type: ignore[assignment]
     GUI_IMPORT_ERROR = exc
 else:
     GUI_IMPORT_ERROR = None
@@ -35,20 +38,21 @@ else:
 class GuiSmokeTests(unittest.TestCase):
     def test_main_window_instantiates_offscreen(self):
         app = QApplication.instance() or QApplication([])
-        window = MainWindow()
-        try:
-            self.assertEqual(window.windowTitle(), "CDSniffer")
-            self.assertEqual(window.tabs.count(), 7)
-            tab_names = [window.tabs.tabText(index) for index in range(window.tabs.count())]
-            self.assertEqual(tab_names, ["Capture", "Real-Time", "Search", "Archives", "Terminal", "Logs", "Presets"])
-            self.assertEqual(window.status_label.text(), "Idle")
-            self.assertIn("Game not detected", window.target_status.text())
-            self.assertTrue(window.archive_extract_match_button.text())
-            self.assertIn("Start capturing", window.start_button.toolTip())
-            self.assertIn("selected decoded", window.archive_correlate_file_button.toolTip())
-        finally:
-            window.close()
-            app.processEvents()
+        with patch("cd_sniffer.gui.resolve_pid", return_value=None):
+            window = MainWindow()
+            try:
+                self.assertEqual(window.windowTitle(), "CDSniffer")
+                self.assertEqual(window.tabs.count(), 7)
+                tab_names = [window.tabs.tabText(index) for index in range(window.tabs.count())]
+                self.assertEqual(tab_names, ["Capture", "Real-Time", "Search", "Archives", "Terminal", "Logs", "Presets"])
+                self.assertEqual(window.status_label.text(), "Idle")
+                self.assertIn("Game not detected", window.target_status.text())
+                self.assertTrue(window.archive_extract_match_button.text())
+                self.assertIn("Start capturing", window.start_button.toolTip())
+                self.assertIn("selected decoded", window.archive_correlate_file_button.toolTip())
+            finally:
+                window.close()
+                app.processEvents()
 
     def test_settings_dialog_has_setting_tooltips(self):
         app = QApplication.instance() or QApplication([])
@@ -210,6 +214,14 @@ class GuiSmokeTests(unittest.TestCase):
         finally:
             window.close()
             app.processEvents()
+
+    def test_collect_matching_windows_defaults_to_process_identity(self):
+        with patch("cd_sniffer.core.resolve_pid", return_value=20), patch(
+            "cd_sniffer.core.enum_windows", return_value=[(1, "Chrome"), (2, "Crimson Desert"), (3, "Settings")]
+        ), patch("cd_sniffer.core.get_window_pid", side_effect=lambda hwnd: {1: 10, 2: 20, 3: 30}[hwnd]):
+            args = argparse.Namespace(process="Crimson Desert", window_titles=[], window_filter_patterns=[])
+            matches = collect_matching_windows(args)
+            self.assertEqual([(pid, title) for _hwnd, pid, title in matches], [(20, "Crimson Desert")])
 
     def test_require_path_validates_missing_and_existing_inputs(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

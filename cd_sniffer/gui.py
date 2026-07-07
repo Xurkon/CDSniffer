@@ -1195,6 +1195,9 @@ class MainWindow(QMainWindow):
         self.ipc_timer = QTimer(self)
         self.ipc_timer.timeout.connect(self.process_ipc_commands)
         self.ipc_timer.start(100)
+        self.detection_timer = QTimer(self)
+        self.detection_timer.timeout.connect(self.refresh_target_indicator)
+        self.detection_timer.start(1000)
         self.freshness_timer = QTimer(self)
         self.freshness_timer.timeout.connect(self.update_freshness_view)
         self.freshness_timer.start(1000)
@@ -3605,7 +3608,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Window Scan Failed", str(exc))
             return
         if matches:
-            self.window_status.setText(f"Found {len(matches)} matching window(s).")
+            if len(matches) == 1:
+                hwnd, pid, title = matches[0]
+                self.window_status.setText(f"Found Crimson Desert window PID {pid} (0x{hwnd:08X}): {title}")
+            else:
+                self.window_status.setText(f"Found {len(matches)} matching window(s).")
         else:
             self.window_status.setText("No matching windows found.")
         self.refresh_target_indicator()

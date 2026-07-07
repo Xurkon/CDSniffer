@@ -14,6 +14,7 @@ from .config import DEFAULT_KEYWORDS
 from .scanner import scan_to_json
 from .windows import (
     close_handle,
+    enum_windows,
     find_pids_by_window_title,
     get_window_pid,
     is_key_down,
@@ -60,6 +61,14 @@ def find_pid_by_name(process_name: str) -> int | None:
     return None
 
 
+def find_pids_by_process_name(process_name: str) -> list[int]:
+    needle = process_name.strip().lower()
+    if not needle:
+        return []
+    pid = find_pid_by_name(process_name)
+    return [pid] if pid else []
+
+
 def resolve_pid(args: argparse.Namespace) -> int | None:
     if getattr(args, "pid", None):
         if is_pid_running(args.pid):
@@ -71,26 +80,43 @@ def resolve_pid(args: argparse.Namespace) -> int | None:
             if pids:
                 return pids[0]
 
-    pid = find_pid_by_name(getattr(args, "process", "Crimson Desert"))
-    if pid:
-        return pid
+    process_name = getattr(args, "process", "Crimson Desert")
+    pids = find_pids_by_process_name(process_name)
+    if pids:
+        return pids[0]
+
+    if process_name:
+        for title in (title for _hwnd, title in enum_windows()):
+            if process_name.lower() in title.lower():
+                pids = find_pids_by_window_title(title)
+                if pids:
+                    return pids[0]
 
     return None
 
 
 def collect_matching_windows(args: argparse.Namespace) -> list[tuple[int, int | None, str]]:
-    from .windows import enum_windows
-
     title_fragments = [fragment.lower() for fragment in (args.window_titles or [])]
     regexes = [re.compile(pattern, re.IGNORECASE) for pattern in (args.window_filter_patterns or [])]
+    target_pid = resolve_pid(args) if not title_fragments and not regexes else None
+    process_name = str(getattr(args, "process", "Crimson Desert")).strip().lower()
     matches: list[tuple[int, int | None, str]] = []
     for hwnd, title in enum_windows():
+        pid = get_window_pid(hwnd)
+        if pid is None:
+            continue
         lowered = title.lower()
         if title_fragments and not any(fragment in lowered for fragment in title_fragments):
             continue
         if regexes and not any(pattern.search(title) for pattern in regexes):
             continue
-        matches.append((hwnd, get_window_pid(hwnd), title))
+        if not title_fragments and not regexes:
+            if target_pid is not None:
+                if pid != target_pid:
+                    continue
+            elif process_name and process_name not in lowered:
+                continue
+        matches.append((hwnd, pid, title))
     return matches
 
 
