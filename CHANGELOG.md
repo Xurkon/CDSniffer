@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added an offscreen PySide6 GUI smoke test that instantiates the main window and verifies the expected tab layout/status widgets
 - Added DMM conflict reports with `--dmm-check` and `--dmm-against` for exact or overlapping byte ranges against existing DMM JSON mods
 - Added opt-in JSON schema validation gates through `--validate-schemas` and `CDSNIFFER_VALIDATE_SCHEMAS=1`
 - Added GUI one-click extraction for selected archive correlation matches, exporting the decoded cache file with archive-relative paths and a provenance sidecar

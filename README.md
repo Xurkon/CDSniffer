@@ -39,6 +39,7 @@ For compiled releases, the clean target is two executables:
 - Provides a dedicated GUI `Archives` tab for building/searching archive indexes and viewing archive correlation matches
 - Can optionally validate generated JSON payloads against bundled schemas before writing reports
 - Can check generated DMM patch drafts against existing DMM mod JSON files for overlapping byte ranges
+- Includes an offscreen PySide6 GUI smoke test for the main window/tab layout
 - Can gate captures until camp mission UI sentinel strings are present in memory
 - Can write only new unique hit text values during a capture session
 - Searches captured payloads from the CLI and the GUI
@@ -477,7 +478,7 @@ Good next steps before opening this up more broadly:
 - [x] Add one-click extraction for the archive entry behind a selected archive correlation match
 - [x] Add JSON schema validation gates through a `--validate-schemas` flag and optional environment variable
 - [x] Add DMM conflict/overlap checking for generated patches against existing DMM mod JSON
-- [ ] Add exact GUI smoke tests with the `PySide6` extra installed
+- [x] Add exact GUI smoke tests with the `PySide6` extra installed
 - [ ] Add sample-driven decoders for any future proprietary PAZ compression payloads that are not raw, zlib, or LZ4
 - [ ] Add a build/release script for `cdsniffer.exe` and `cdsniffer-gui.exe`
 - [ ] Add a random session token to the localhost GUI IPC channel
