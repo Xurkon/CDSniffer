@@ -350,6 +350,7 @@ Search the live GUI capture:
 
 Use the GUI `Archives` tab:
 
+- Use `Guided Correlation Workspace` when you want the UI to walk through index building, index search, archive correlation, selected-file correlation, decoded-folder correlation, or DMM draft export
 - Set `Archive root` to the Crimson Desert install folder or a specific `.pamt` file
 - Set `Index DB` to the SQLite file you want to create or reuse
 - Use `Index globs` to keep the index focused, such as `*.paseq`, `*.json`, or `*.xml`
@@ -358,6 +359,7 @@ Use the GUI `Archives` tab:
 - Set `Capture` to a CDSniffer JSON/JSONL capture and `Cache dir` to a decoded cache folder
 - Use archive correlation globs and path terms to narrow candidates before clicking `Run Archive Correlation`
 - Use `Decoded file` plus `Run File Correlation` when you want to compare the capture against one selected unpacked/cache file instead of an entire folder or archive index
+- Use `Decoded root`, optional `Baseline`, and `Run Folder Correlation` when you want to compare a capture against a decoded folder tree and optionally rank target-only before/after candidates
 - Inspect the `Correlation Matches` table for confidence, decoded offset, evidence value, decoder, original bytes, cache path, and confidence reasons
 - Select a correlation row to preview the decoded/cache bytes around the offset, printable text, evidence metadata, and generic patch skeleton
 - Click `Export DMM Draft` after correlation to write a review-required DMM patch JSON draft with grouped `game_file` and `changes` entries
@@ -439,7 +441,7 @@ Good next steps before opening this up more broadly:
 
 - [x] Add archive/file match preview in the GUI so selecting a correlation row shows decoded bytes, printable text, offset metadata, and patch skeleton context
 - [x] Add DMM-specific patch emitters on top of the generic correlation patch skeletons
-- [ ] Add a guided correlation workspace that walks users through capture selection, archive/folder/file comparison, baseline selection, and export format
+- [x] Add a guided correlation workspace that walks users through capture selection, archive/folder/file comparison, baseline selection, and export format
 - [ ] Expand format analyzers with deeper PASEQ, quest/mission table, hash, and typed record parsers
 - [ ] Add repeat-run confidence rollups across multiple target captures
 - [ ] Add one-click extraction for the archive entry behind a selected archive correlation match

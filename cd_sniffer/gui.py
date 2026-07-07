@@ -924,6 +924,23 @@ class ArchiveTaskWorker(QObject):
                 )
                 self.result.emit(self.task, result)
                 return
+            if self.task == "correlate-root":
+                root = Path(self.params["root_path"])
+                baseline_text = str(self.params.get("baseline_path") or "").strip()
+                self.status.emit(f"Correlating capture against decoded folder {root}...")
+                result = correlate_capture_to_files(
+                    Path(self.params["capture_path"]),
+                    root,
+                    baseline_capture_path=Path(baseline_text) if baseline_text else None,
+                    patterns=self.params.get("patterns") or None,
+                    max_matches_per_evidence=int(self.params["max_matches_per_evidence"]),
+                    max_total_matches=int(self.params["max_matches"]),
+                    include_numeric=bool(self.params["include_numeric"]),
+                    context_bytes=int(self.params["context_bytes"]),
+                    include_format_hints=bool(self.params["include_format_hints"]),
+                )
+                self.result.emit(self.task, result)
+                return
             raise ValueError(f"Unknown archive task: {self.task}")
         except Exception as exc:
             self.error.emit(str(exc))
@@ -1866,6 +1883,30 @@ class MainWindow(QMainWindow):
 
     def build_archives_tab(self) -> None:
         layout = QVBoxLayout(self.archives_tab)
+        guide_box = QGroupBox("Guided Correlation Workspace")
+        guide_layout = QGridLayout(guide_box)
+        self.correlation_guide_mode_combo = QComboBox()
+        self.correlation_guide_mode_combo.addItems(
+            [
+                "1. Build archive index",
+                "2. Search archive index",
+                "3. Correlate archive index",
+                "4. Correlate selected decoded file",
+                "5. Correlate decoded folder",
+                "6. Export DMM draft",
+            ]
+        )
+        self.correlation_guide_mode_combo.currentIndexChanged.connect(self.update_correlation_guide)
+        self.correlation_guide_label = QLabel()
+        self.correlation_guide_label.setWordWrap(True)
+        self.correlation_guide_run_button = QPushButton("Run Guided Step")
+        self.correlation_guide_run_button.clicked.connect(self.run_correlation_guide_action)
+        guide_layout.addWidget(QLabel("Step"), 0, 0)
+        guide_layout.addWidget(self.correlation_guide_mode_combo, 0, 1)
+        guide_layout.addWidget(self.correlation_guide_run_button, 0, 2)
+        guide_layout.addWidget(self.correlation_guide_label, 1, 0, 1, 3)
+        layout.addWidget(guide_box)
+
         controls = QGroupBox("Archive Index")
         controls_layout = QGridLayout(controls)
         self.archive_root_edit = QLineEdit(r"C:\Program Files (x86)\Steam\steamapps\common\Crimson Desert")
@@ -1930,7 +1971,11 @@ class MainWindow(QMainWindow):
         correlate_box = QGroupBox("Correlate Capture Against Archive Index")
         correlate_layout = QGridLayout(correlate_box)
         self.archive_capture_edit = QLineEdit(str(Path("logs") / "camp-mission.jsonl"))
+        self.archive_baseline_capture_edit = QLineEdit()
+        self.archive_baseline_capture_edit.setPlaceholderText("Optional before-state capture for target-only diff")
         self.archive_cache_dir_edit = QLineEdit(str(Path("logs") / "archive-cache"))
+        self.archive_correlation_root_edit = QLineEdit()
+        self.archive_correlation_root_edit.setPlaceholderText("Optional decoded/unpacked folder for folder correlation")
         self.archive_correlation_globs_edit = QLineEdit("*.paseq, *.json, *.xml")
         self.archive_correlation_terms_edit = QLineEdit()
         self.archive_correlation_terms_edit.setPlaceholderText("Optional archive path terms")
@@ -1956,14 +2001,20 @@ class MainWindow(QMainWindow):
         self.archive_correlation_format_combo.addItems(["markdown", "json", "csv"])
         self.archive_browse_capture_button = QPushButton("Browse Capture")
         self.archive_browse_capture_button.clicked.connect(self.browse_archive_capture)
+        self.archive_browse_baseline_button = QPushButton("Browse Baseline")
+        self.archive_browse_baseline_button.clicked.connect(self.browse_archive_baseline)
         self.archive_browse_cache_button = QPushButton("Browse Cache")
         self.archive_browse_cache_button.clicked.connect(self.browse_archive_cache)
+        self.archive_browse_correlation_root_button = QPushButton("Browse Decoded Root")
+        self.archive_browse_correlation_root_button.clicked.connect(self.browse_archive_correlation_root)
         self.archive_selected_file_edit = QLineEdit()
         self.archive_selected_file_edit.setPlaceholderText("Optional decoded/unpacked file for focused comparison")
         self.archive_browse_selected_file_button = QPushButton("Browse Decoded File")
         self.archive_browse_selected_file_button.clicked.connect(self.browse_archive_selected_file)
         self.archive_correlate_file_button = QPushButton("Run File Correlation")
         self.archive_correlate_file_button.clicked.connect(self.run_selected_file_correlation)
+        self.archive_correlate_root_button = QPushButton("Run Folder Correlation")
+        self.archive_correlate_root_button.clicked.connect(self.run_root_correlation)
         self.archive_correlate_button = QPushButton("Run Archive Correlation")
         self.archive_correlate_button.clicked.connect(self.run_archive_correlation)
         self.archive_export_correlation_button = QPushButton("Export Correlation")
@@ -1976,35 +2027,43 @@ class MainWindow(QMainWindow):
         correlate_layout.addWidget(QLabel("Capture"), 0, 0)
         correlate_layout.addWidget(self.archive_capture_edit, 0, 1, 1, 4)
         correlate_layout.addWidget(self.archive_browse_capture_button, 0, 5)
-        correlate_layout.addWidget(QLabel("Cache dir"), 1, 0)
-        correlate_layout.addWidget(self.archive_cache_dir_edit, 1, 1, 1, 4)
-        correlate_layout.addWidget(self.archive_browse_cache_button, 1, 5)
-        correlate_layout.addWidget(QLabel("Decoded file"), 2, 0)
-        correlate_layout.addWidget(self.archive_selected_file_edit, 2, 1, 1, 4)
-        correlate_layout.addWidget(self.archive_browse_selected_file_button, 2, 5)
-        correlate_layout.addWidget(QLabel("Globs"), 3, 0)
-        correlate_layout.addWidget(self.archive_correlation_globs_edit, 3, 1, 1, 2)
-        correlate_layout.addWidget(QLabel("Path terms"), 3, 3)
-        correlate_layout.addWidget(self.archive_correlation_terms_edit, 3, 4, 1, 2)
-        correlate_layout.addWidget(QLabel("Max entries"), 4, 0)
-        correlate_layout.addWidget(self.archive_correlation_max_entries_spin, 4, 1)
-        correlate_layout.addWidget(QLabel("Max matches"), 4, 2)
-        correlate_layout.addWidget(self.archive_correlation_max_matches_spin, 4, 3)
-        correlate_layout.addWidget(QLabel("Per evidence"), 4, 4)
-        correlate_layout.addWidget(self.archive_correlation_max_per_evidence_spin, 4, 5)
-        correlate_layout.addWidget(QLabel("Context bytes"), 5, 0)
-        correlate_layout.addWidget(self.archive_correlation_context_spin, 5, 1)
-        correlate_layout.addWidget(self.archive_correlation_numeric_check, 5, 2)
-        correlate_layout.addWidget(self.archive_correlation_hints_check, 5, 3)
-        correlate_layout.addWidget(self.archive_correlation_decrypt_check, 5, 4)
-        correlate_layout.addWidget(self.archive_correlation_format_combo, 5, 5)
-        correlate_layout.addWidget(self.archive_correlate_button, 6, 0, 1, 2)
-        correlate_layout.addWidget(self.archive_correlate_file_button, 6, 2, 1, 2)
-        correlate_layout.addWidget(self.archive_export_correlation_button, 6, 4)
-        correlate_layout.addWidget(self.archive_export_dmm_button, 6, 5)
-        correlate_layout.addWidget(QLabel("Table filter"), 7, 0)
-        correlate_layout.addWidget(self.archive_correlation_filter_edit, 7, 1, 1, 5)
+        correlate_layout.addWidget(QLabel("Baseline"), 1, 0)
+        correlate_layout.addWidget(self.archive_baseline_capture_edit, 1, 1, 1, 4)
+        correlate_layout.addWidget(self.archive_browse_baseline_button, 1, 5)
+        correlate_layout.addWidget(QLabel("Cache dir"), 2, 0)
+        correlate_layout.addWidget(self.archive_cache_dir_edit, 2, 1, 1, 4)
+        correlate_layout.addWidget(self.archive_browse_cache_button, 2, 5)
+        correlate_layout.addWidget(QLabel("Decoded root"), 3, 0)
+        correlate_layout.addWidget(self.archive_correlation_root_edit, 3, 1, 1, 4)
+        correlate_layout.addWidget(self.archive_browse_correlation_root_button, 3, 5)
+        correlate_layout.addWidget(QLabel("Decoded file"), 4, 0)
+        correlate_layout.addWidget(self.archive_selected_file_edit, 4, 1, 1, 4)
+        correlate_layout.addWidget(self.archive_browse_selected_file_button, 4, 5)
+        correlate_layout.addWidget(QLabel("Globs"), 5, 0)
+        correlate_layout.addWidget(self.archive_correlation_globs_edit, 5, 1, 1, 2)
+        correlate_layout.addWidget(QLabel("Path terms"), 5, 3)
+        correlate_layout.addWidget(self.archive_correlation_terms_edit, 5, 4, 1, 2)
+        correlate_layout.addWidget(QLabel("Max entries"), 6, 0)
+        correlate_layout.addWidget(self.archive_correlation_max_entries_spin, 6, 1)
+        correlate_layout.addWidget(QLabel("Max matches"), 6, 2)
+        correlate_layout.addWidget(self.archive_correlation_max_matches_spin, 6, 3)
+        correlate_layout.addWidget(QLabel("Per evidence"), 6, 4)
+        correlate_layout.addWidget(self.archive_correlation_max_per_evidence_spin, 6, 5)
+        correlate_layout.addWidget(QLabel("Context bytes"), 7, 0)
+        correlate_layout.addWidget(self.archive_correlation_context_spin, 7, 1)
+        correlate_layout.addWidget(self.archive_correlation_numeric_check, 7, 2)
+        correlate_layout.addWidget(self.archive_correlation_hints_check, 7, 3)
+        correlate_layout.addWidget(self.archive_correlation_decrypt_check, 7, 4)
+        correlate_layout.addWidget(self.archive_correlation_format_combo, 7, 5)
+        correlate_layout.addWidget(self.archive_correlate_button, 8, 0)
+        correlate_layout.addWidget(self.archive_correlate_file_button, 8, 1)
+        correlate_layout.addWidget(self.archive_correlate_root_button, 8, 2)
+        correlate_layout.addWidget(self.archive_export_correlation_button, 8, 3)
+        correlate_layout.addWidget(self.archive_export_dmm_button, 8, 4)
+        correlate_layout.addWidget(QLabel("Table filter"), 9, 0)
+        correlate_layout.addWidget(self.archive_correlation_filter_edit, 9, 1, 1, 5)
         layout.addWidget(correlate_box)
+        self.update_correlation_guide()
 
         self.archive_summary_label = QLabel("No archive operation run yet.")
         self.archive_summary_label.setWordWrap(True)
@@ -2080,6 +2139,32 @@ class MainWindow(QMainWindow):
     def archive_terms(self, text: str) -> list[str]:
         return split_values(text)
 
+    def update_correlation_guide(self) -> None:
+        if not hasattr(self, "correlation_guide_label"):
+            return
+        guidance = [
+            "Build or refresh the SQLite archive index after a game update or when changing indexed file families.",
+            "Search the index to find likely archive paths before decoding or correlating.",
+            "Compare a capture against indexed archive entries. This lazily decodes candidates into the cache directory.",
+            "Compare a capture against one decoded/cache file when you already know the likely target file.",
+            "Compare a capture against a decoded folder. Add a baseline capture to highlight target-only candidates.",
+            "Export the latest archive/file/folder correlation result as a review-required DMM byte-patch draft.",
+        ]
+        index = max(0, min(self.correlation_guide_mode_combo.currentIndex(), len(guidance) - 1))
+        self.correlation_guide_label.setText(guidance[index])
+
+    def run_correlation_guide_action(self) -> None:
+        index = self.correlation_guide_mode_combo.currentIndex()
+        actions = [
+            self.run_archive_index_build,
+            self.run_archive_index_search,
+            self.run_archive_correlation,
+            self.run_selected_file_correlation,
+            self.run_root_correlation,
+            self.export_dmm_draft,
+        ]
+        actions[max(0, min(index, len(actions) - 1))]()
+
     def browse_archive_root(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "Select Archive Root", self.archive_root_edit.text())
         if path:
@@ -2095,10 +2180,20 @@ class MainWindow(QMainWindow):
         if path:
             self.archive_capture_edit.setText(path)
 
+    def browse_archive_baseline(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Select Baseline Capture File", self.archive_baseline_capture_edit.text() or self.archive_capture_edit.text(), "Capture Files (*.jsonl *.json);;All Files (*.*)")
+        if path:
+            self.archive_baseline_capture_edit.setText(path)
+
     def browse_archive_cache(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "Select Archive Cache Directory", self.archive_cache_dir_edit.text())
         if path:
             self.archive_cache_dir_edit.setText(path)
+
+    def browse_archive_correlation_root(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "Select Decoded or Unpacked Root", self.archive_correlation_root_edit.text() or str(Path.cwd()))
+        if path:
+            self.archive_correlation_root_edit.setText(path)
 
     def browse_archive_selected_file(self) -> None:
         start = self.archive_selected_file_edit.text().strip() or self.archive_cache_dir_edit.text().strip() or str(Path.cwd())
@@ -2112,6 +2207,8 @@ class MainWindow(QMainWindow):
             "archive_search_button",
             "archive_correlate_button",
             "archive_correlate_file_button",
+            "archive_correlate_root_button",
+            "correlation_guide_run_button",
             "archive_export_index_button",
             "archive_export_correlation_button",
             "archive_export_dmm_button",
@@ -2230,6 +2327,34 @@ class MainWindow(QMainWindow):
             },
         )
 
+    def run_root_correlation(self) -> None:
+        capture_path = Path(self.archive_capture_edit.text().strip())
+        root_path = Path(self.archive_correlation_root_edit.text().strip())
+        baseline_text = self.archive_baseline_capture_edit.text().strip()
+        if not capture_path.exists():
+            QMessageBox.warning(self, "Missing Capture", f"Capture file not found: {capture_path}")
+            return
+        if baseline_text and not Path(baseline_text).exists():
+            QMessageBox.warning(self, "Missing Baseline", f"Baseline capture file not found: {baseline_text}")
+            return
+        if not root_path.exists() or not root_path.is_dir():
+            QMessageBox.warning(self, "Missing Decoded Root", f"Decoded/unpacked folder not found: {root_path}")
+            return
+        self.start_archive_task(
+            "correlate-root",
+            {
+                "capture_path": str(capture_path),
+                "baseline_path": baseline_text,
+                "root_path": str(root_path),
+                "patterns": self.archive_patterns(self.archive_correlation_globs_edit.text()),
+                "max_matches": int(self.archive_correlation_max_matches_spin.value()),
+                "max_matches_per_evidence": int(self.archive_correlation_max_per_evidence_spin.value()),
+                "context_bytes": int(self.archive_correlation_context_spin.value()),
+                "include_numeric": self.archive_correlation_numeric_check.isChecked(),
+                "include_format_hints": self.archive_correlation_hints_check.isChecked(),
+            },
+        )
+
     @Slot(str, dict)
     def on_archive_task_result(self, task: str, result: dict[str, Any]) -> None:
         if task == "build-index":
@@ -2247,6 +2372,10 @@ class MainWindow(QMainWindow):
         if task == "correlate-file":
             self.render_file_correlation(result)
             self.append_log(f"File correlation returned {result.get('match_count', 0)} match(es).")
+            return
+        if task == "correlate-root":
+            self.render_file_correlation(result)
+            self.append_log(f"Folder correlation returned {result.get('match_count', 0)} match(es).")
 
     @Slot(str)
     def on_archive_task_status(self, message: str) -> None:
@@ -2338,8 +2467,9 @@ class MainWindow(QMainWindow):
         matches = list(result.get("matches", []))
         self.current_correlation_matches = matches
         selected = ", ".join(result.get("selected_files", [])) or result.get("root", "")
+        scope = "selected file(s)" if result.get("selected_files") else "decoded folder file(s)"
         self.archive_summary_label.setText(
-            f"File correlation found {result.get('match_count', 0)} matches in {result.get('file_count', 0)} selected file(s)."
+            f"File correlation found {result.get('match_count', 0)} matches in {result.get('file_count', 0)} {scope}."
         )
         self.archive_correlation_table.setRowCount(len(matches))
         for row_index, match in enumerate(matches):

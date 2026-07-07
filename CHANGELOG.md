@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added a guided GUI correlation workspace with step guidance, decoded-folder correlation, optional baseline capture support, and guided action dispatch
 - Added DMM byte-patch draft export from correlation JSON reports and from the GUI Archives tab
 - Added GUI correlation match previews that show decoded/cache bytes, printable text, offset metadata, and patch skeleton context for selected archive or file matches
 - Added the reviewed project audit report with maintainer follow-up notes and clarified README guidance for choosing archive, folder, or selected-file correlation
