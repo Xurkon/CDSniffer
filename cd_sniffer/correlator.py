@@ -508,11 +508,77 @@ def _apply_baseline_diff(matches: list[dict[str, Any]], baseline_matches: list[d
     return {"target_only_count": target_only_count, "shared_count": shared_count}
 
 
+def _matches_for_capture(
+    capture_path: Path,
+    files: list[Path],
+    root: Path,
+    *,
+    include_numeric: bool,
+    max_matches_per_evidence: int,
+    max_total_matches: int,
+    context_bytes: int,
+    include_format_hints: bool,
+) -> tuple[int, int, list[dict[str, Any]]]:
+    evidence = extract_evidence_from_capture(capture_path, include_numeric=include_numeric)
+    raw_matches = _collect_raw_matches(
+        evidence,
+        files,
+        root,
+        max_matches_per_evidence=max_matches_per_evidence,
+        max_total_matches=max_total_matches,
+        context_bytes=context_bytes,
+        include_format_hints=include_format_hints,
+    )
+    return len(evidence), len(raw_matches), aggregate_correlation_matches(raw_matches)
+
+
+def _apply_repeat_rollups(
+    matches: list[dict[str, Any]],
+    repeat_matches_by_capture: dict[str, list[dict[str, Any]]],
+) -> dict[str, int]:
+    repeat_keys: dict[tuple[str, int, str], list[str]] = {}
+    for capture_path, repeat_matches in repeat_matches_by_capture.items():
+        for match in repeat_matches:
+            key = _candidate_key(match)
+            repeat_keys.setdefault(key, [])
+            if capture_path not in repeat_keys[key]:
+                repeat_keys[key].append(capture_path)
+
+    total_runs = 1 + len(repeat_matches_by_capture)
+    rollup_match_count = 0
+    consensus_count = 0
+    for match in matches:
+        repeated_in = repeat_keys.get(_candidate_key(match), [])
+        hit_count = 1 + len(repeated_in)
+        ratio = round(hit_count / max(1, total_runs), 3)
+        match["repeat_run_hits"] = hit_count
+        match["repeat_run_total"] = total_runs
+        match["repeat_run_ratio"] = ratio
+        match["repeat_capture_paths"] = repeated_in
+        if hit_count <= 1:
+            continue
+        rollup_match_count += 1
+        reasons = list(match.get("confidence_reasons", []))
+        if "repeat-run" not in reasons:
+            reasons.append("repeat-run")
+        confidence = float(match.get("confidence", 0.0) or 0.0) + min(0.15, 0.05 * (hit_count - 1))
+        if hit_count == total_runs:
+            consensus_count += 1
+            if "repeat-run-consensus" not in reasons:
+                reasons.append("repeat-run-consensus")
+            confidence += 0.03
+        match["confidence"] = round(min(1.0, confidence), 3)
+        match["confidence_reasons"] = reasons
+
+    return {"repeat_rollup_match_count": rollup_match_count, "repeat_consensus_count": consensus_count}
+
+
 def correlate_capture_to_files(
     capture_path: Path,
     root: Path,
     *,
     baseline_capture_path: Path | None = None,
+    repeat_capture_paths: list[Path] | None = None,
     selected_files: list[Path] | None = None,
     recursive: bool = True,
     patterns: list[str] | None = None,
@@ -547,23 +613,47 @@ def correlate_capture_to_files(
     baseline_match_count = 0
     target_only_count = 0
     shared_count = 0
+    repeat_capture_paths = repeat_capture_paths or []
+    repeat_evidence_counts: dict[str, int] = {}
+    repeat_match_counts: dict[str, int] = {}
+    repeat_rollup_match_count = 0
+    repeat_consensus_count = 0
     if baseline_capture_path is not None:
-        baseline_evidence = extract_evidence_from_capture(baseline_capture_path, include_numeric=include_numeric)
-        baseline_evidence_count = len(baseline_evidence)
-        baseline_raw_matches = _collect_raw_matches(
-            baseline_evidence,
+        baseline_evidence_count, _, baseline_matches = _matches_for_capture(
+            baseline_capture_path,
             files,
             root,
+            include_numeric=include_numeric,
             max_matches_per_evidence=max_matches_per_evidence,
             max_total_matches=max_total_matches,
             context_bytes=context_bytes,
             include_format_hints=include_format_hints,
         )
-        baseline_matches = aggregate_correlation_matches(baseline_raw_matches)
         baseline_match_count = len(baseline_matches)
         diff_counts = _apply_baseline_diff(matches, baseline_matches)
         target_only_count = diff_counts["target_only_count"]
         shared_count = diff_counts["shared_count"]
+
+    if repeat_capture_paths:
+        repeat_matches_by_capture: dict[str, list[dict[str, Any]]] = {}
+        for repeat_capture_path in repeat_capture_paths:
+            repeat_evidence_count, repeat_raw_match_count, repeat_matches = _matches_for_capture(
+                repeat_capture_path,
+                files,
+                root,
+                include_numeric=include_numeric,
+                max_matches_per_evidence=max_matches_per_evidence,
+                max_total_matches=max_total_matches,
+                context_bytes=context_bytes,
+                include_format_hints=include_format_hints,
+            )
+            repeat_capture_key = str(repeat_capture_path)
+            repeat_evidence_counts[repeat_capture_key] = repeat_evidence_count
+            repeat_match_counts[repeat_capture_key] = len(repeat_matches)
+            repeat_matches_by_capture[repeat_capture_key] = repeat_matches
+        rollup_counts = _apply_repeat_rollups(matches, repeat_matches_by_capture)
+        repeat_rollup_match_count = rollup_counts["repeat_rollup_match_count"]
+        repeat_consensus_count = rollup_counts["repeat_consensus_count"]
 
     matches.sort(key=lambda item: (-float(item["confidence"]), str(item["relative_file"]), int(item["offset"])))
     matches = matches[:max_total_matches]
@@ -575,6 +665,7 @@ def correlate_capture_to_files(
         "created_at": datetime.now(timezone.utc).isoformat(),
         "capture_path": str(capture_path),
         "baseline_capture_path": str(baseline_capture_path) if baseline_capture_path is not None else None,
+        "repeat_capture_paths": [str(path) for path in repeat_capture_paths],
         "root": str(root),
         "selected_files": [str(path) for path in selected_files] if selected_files is not None else [],
         "recursive": recursive,
@@ -586,6 +677,10 @@ def correlate_capture_to_files(
         "baseline_match_count": baseline_match_count,
         "target_only_count": target_only_count,
         "shared_count": shared_count,
+        "repeat_evidence_counts": repeat_evidence_counts,
+        "repeat_match_counts": repeat_match_counts,
+        "repeat_rollup_match_count": repeat_rollup_match_count,
+        "repeat_consensus_count": repeat_consensus_count,
         "format_hint_count": sum(len(match.get("format_hints", [])) for match in matches),
         "file_count": len(files),
         "match_count": len(matches),
@@ -609,6 +704,9 @@ def flatten_correlation_results(result: dict[str, Any]) -> list[dict[str, Any]]:
             "offset_hex": match.get("offset_hex"),
             "confidence": match.get("confidence"),
             "diff_status": match.get("diff_status"),
+            "repeat_run_hits": match.get("repeat_run_hits"),
+            "repeat_run_total": match.get("repeat_run_total"),
+            "repeat_run_ratio": match.get("repeat_run_ratio"),
             "evidence_count": match.get("evidence_count"),
             "match_type": match.get("match_type"),
             "file_format": match.get("file_format"),
@@ -632,6 +730,9 @@ def render_correlation_csv(result: dict[str, Any]) -> str:
         "offset_hex",
         "confidence",
         "diff_status",
+        "repeat_run_hits",
+        "repeat_run_total",
+        "repeat_run_ratio",
         "evidence_count",
         "match_type",
         "file_format",
@@ -667,16 +768,24 @@ def render_correlation_markdown(result: dict[str, Any]) -> str:
                 f"- Shared with baseline: `{result.get('shared_count', 0)}`",
             ]
         )
+    if result.get("repeat_capture_paths"):
+        lines.extend(
+            [
+                f"- Repeat captures: `{len(result.get('repeat_capture_paths', []))}`",
+                f"- Repeat rollup matches: `{result.get('repeat_rollup_match_count', 0)}`",
+                f"- Repeat consensus matches: `{result.get('repeat_consensus_count', 0)}`",
+            ]
+        )
     lines.extend(
         [
             "",
-            "| Confidence | Diff | File | Offset | Type | Format | Evidence | Count | Reasons | Format Hints | Original Bytes |",
-            "| ---: | --- | --- | ---: | --- | --- | --- | ---: | --- | --- | --- |",
+            "| Confidence | Diff | Repeat | File | Offset | Type | Format | Evidence | Count | Reasons | Format Hints | Original Bytes |",
+            "| ---: | --- | ---: | --- | ---: | --- | --- | --- | ---: | --- | --- | --- |",
         ]
     )
     rows = flatten_correlation_results(result)
     if not rows:
-        lines.append("| - | - | - | - | - | - | No matches | - | - | - | - |")
+        lines.append("| - | - | - | - | - | - | - | No matches | - | - | - | - |")
         return "\n".join(lines) + "\n"
     for row in rows:
         file_path = str(row.get("file", "")).replace("|", "\\|")
@@ -684,7 +793,10 @@ def render_correlation_markdown(result: dict[str, Any]) -> str:
         original = str(row.get("original_bytes", "")).replace("|", "\\|")
         reasons = str(row.get("confidence_reasons", "")).replace("|", "\\|")
         format_hints = str(row.get("format_hint_summary", "")).replace("|", "\\|")
+        repeat = ""
+        if row.get("repeat_run_hits") is not None and row.get("repeat_run_total") is not None:
+            repeat = f"{row.get('repeat_run_hits')}/{row.get('repeat_run_total')}"
         lines.append(
-            f"| {row.get('confidence', '')} | {row.get('diff_status', '')} | {file_path} | `{row.get('offset_hex', '')}` | {row.get('match_type', '')} | {row.get('file_format', '')} | {evidence} | {row.get('evidence_count', '')} | {reasons} | {format_hints} | `{original}` |"
+            f"| {row.get('confidence', '')} | {row.get('diff_status', '')} | {repeat} | {file_path} | `{row.get('offset_hex', '')}` | {row.get('match_type', '')} | {row.get('file_format', '')} | {evidence} | {row.get('evidence_count', '')} | {reasons} | {format_hints} | `{original}` |"
         )
     return "\n".join(lines) + "\n"

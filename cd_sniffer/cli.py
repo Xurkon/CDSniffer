@@ -145,6 +145,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--correlate-capture", help="Capture JSON/JSONL file to correlate against unpacked files")
     parser.add_argument("--correlate-target", help="Target capture JSON/JSONL file for baseline-vs-target correlation")
     parser.add_argument("--correlate-baseline", help="Optional baseline capture JSON/JSONL file for diff correlation")
+    parser.add_argument("--correlate-repeat", action="append", dest="correlate_repeats", help="Additional target capture JSON/JSONL file for repeat-run confidence rollups; may be repeated")
     parser.add_argument("--correlate-root", help="Root directory of unpacked/game files to scan")
     parser.add_argument("--correlate-file", action="append", dest="correlate_files", help="Specific unpacked/decoded file to scan; may be repeated")
     parser.add_argument("--correlate-recursive", action="store_true", default=True, help="Recursively scan subfolders for correlation")
@@ -466,6 +467,7 @@ def main() -> int:
             return 1
         capture_path = Path(target_capture_arg)
         baseline_capture_path = Path(args.correlate_baseline) if args.correlate_baseline else None
+        repeat_capture_paths = [Path(item) for item in args.correlate_repeats or []]
         selected_files = [Path(item) for item in args.correlate_files or []]
         root_path = Path(args.correlate_root) if args.correlate_root else selected_files[0].parent
         if not capture_path.exists():
@@ -474,6 +476,10 @@ def main() -> int:
         if baseline_capture_path is not None and not baseline_capture_path.exists():
             print(f"Baseline capture file not found: {baseline_capture_path}")
             return 1
+        for repeat_capture_path in repeat_capture_paths:
+            if not repeat_capture_path.exists():
+                print(f"Repeat capture file not found: {repeat_capture_path}")
+                return 1
         for selected_file in selected_files:
             if not selected_file.exists() or not selected_file.is_file():
                 print(f"Correlation file not found: {selected_file}")
@@ -498,6 +504,7 @@ def main() -> int:
                 capture_path,
                 root_path,
                 baseline_capture_path=baseline_capture_path,
+                repeat_capture_paths=repeat_capture_paths,
                 selected_files=selected_files or None,
                 recursive=args.correlate_recursive,
                 patterns=args.correlate_globs,

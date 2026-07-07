@@ -19,6 +19,12 @@
     "baseline_capture_path": {
       "type": ["string", "null"]
     },
+    "repeat_capture_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "root": {
       "type": "string"
     },
@@ -62,6 +68,28 @@
       "minimum": 0
     },
     "shared_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "repeat_evidence_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "repeat_match_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "repeat_rollup_match_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "repeat_consensus_count": {
       "type": "integer",
       "minimum": 0
     },
@@ -161,6 +189,25 @@
           "diff_status": {
             "type": "string",
             "enum": ["uncompared", "target-only", "shared-with-baseline"]
+          },
+          "repeat_run_hits": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "repeat_run_total": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "repeat_run_ratio": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "repeat_capture_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "evidence_count": {
             "type": "integer",

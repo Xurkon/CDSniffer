@@ -414,6 +414,39 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(mission_b["diff_status"], "target-only")
         self.assertIn("target-only", mission_b["confidence_reasons"])
 
+    def test_correlator_adds_repeat_run_rollups(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            unpacked = root / "unpacked"
+            unpacked.mkdir()
+            target = unpacked / "mission_table.bin"
+            target.write_bytes(b"Mission_A----Mission_B")
+            primary_capture = root / "primary.jsonl"
+            repeat_capture = root / "repeat.jsonl"
+            primary_capture.write_text(json_line(capture_payload(["Mission_A", "Mission_B"])), encoding="utf-8")
+            repeat_capture.write_text(json_line(capture_payload(["Mission_A"])), encoding="utf-8")
+
+            result = correlate_capture_to_files(
+                primary_capture,
+                unpacked,
+                repeat_capture_paths=[repeat_capture],
+                patterns=["*.bin"],
+                max_total_matches=10,
+            )
+            md_text = render_correlation_markdown(result)
+
+        matches = {match["hit_text"]: match for match in result["matches"]}
+        self.assertEqual(result["repeat_rollup_match_count"], 1)
+        self.assertEqual(result["repeat_consensus_count"], 1)
+        self.assertEqual(matches["Mission_A"]["repeat_run_hits"], 2)
+        self.assertEqual(matches["Mission_A"]["repeat_run_total"], 2)
+        self.assertEqual(matches["Mission_A"]["repeat_run_ratio"], 1.0)
+        self.assertEqual(matches["Mission_B"]["repeat_run_hits"], 1)
+        self.assertIn("repeat-run", matches["Mission_A"]["confidence_reasons"])
+        self.assertIn("repeat-run-consensus", matches["Mission_A"]["confidence_reasons"])
+        self.assertIn("Repeat rollup matches", md_text)
+        self.assertIn("2/2", md_text)
+
     def test_correlator_can_scan_one_selected_unpacked_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

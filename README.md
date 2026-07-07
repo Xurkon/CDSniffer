@@ -30,6 +30,7 @@ For compiled releases, the clean target is two executables:
 - Can correlate captured strings, hit bytes, and numeric candidates back to unpacked file offsets
 - Groups duplicate evidence at the same file offset so one candidate carries its full evidence trail
 - Can compare baseline and target captures to highlight target-only file-offset candidates
+- Can roll up repeated target captures to boost candidates that reappear across multiple runs
 - Adds format-aware correlation hints for domain paths, mission/quest-like JSON records, text line locations, PASEQ timing/label candidates, nearby strings, hash candidates, and little-endian integers
 - Can parse PAMT indexes and extract/validate/decode PAZ archive entries without launching an external unpacker
 - Can build a reusable SQLite PAMT/PAZ archive index for fast repeated lookups after a game patch
@@ -265,6 +266,12 @@ Correlate a baseline/target pair against unpacked files:
 python -m cd_sniffer --correlate-baseline logs\before-camp-ui.jsonl --correlate-target logs\camp-ui-open.jsonl --correlate-root D:\Documents\CrimsonDesertMods\unpacked --correlate-glob *.json --correlate-glob *.paseq --correlate-format markdown --correlate-output logs\correlation-diff.md
 ```
 
+Correlate repeated target captures and boost candidates that show up every time:
+
+```powershell
+python -m cd_sniffer --correlate-target logs\camp-ui-open-1.jsonl --correlate-repeat logs\camp-ui-open-2.jsonl --correlate-repeat logs\camp-ui-open-3.jsonl --correlate-root D:\Documents\CrimsonDesertMods\unpacked --correlate-glob *.json --correlate-glob *.paseq --correlate-format markdown --correlate-output logs\correlation-repeat-rollup.md
+```
+
 Export a DMM byte-patch draft from a JSON correlation report:
 
 ```powershell
@@ -293,6 +300,7 @@ Useful correlation options:
 - `--correlate-capture` points to a CDSniffer JSON or JSONL capture
 - `--correlate-target` is an explicit target-capture alias for diff workflows
 - `--correlate-baseline` compares a before-state capture against the target capture
+- `--correlate-repeat` adds another target capture to the repeat-run rollup and can be repeated
 - `--correlate-root` points to the unpacked/game file tree to scan
 - `--correlate-file` points to one specific decoded/unpacked file to scan and can be repeated
 - `--correlate-glob` limits scanned files by glob and can be repeated
@@ -313,6 +321,7 @@ Correlation results include:
 - File format, such as `json`, `paseq`, `txt`, or `binary`
 - Evidence count and evidence trail for grouped candidates
 - Confidence reasons such as exact hit bytes, text-and-bytes, nearby numeric evidence, or target-only
+- Repeat-run fields showing how many target captures reproduced the same file/offset/original-byte candidate
 - Format hints such as domain path terms, mission/quest-like JSON records, text line/column, PASEQ timing and sequence labels, nearby printable strings, CRC/hash candidates, and little-endian values
 - Diff status when a baseline is provided: `target-only` or `shared-with-baseline`
 - Original bytes at the file offset
@@ -443,7 +452,7 @@ Good next steps before opening this up more broadly:
 - [x] Add DMM-specific patch emitters on top of the generic correlation patch skeletons
 - [x] Add a guided correlation workspace that walks users through capture selection, archive/folder/file comparison, baseline selection, and export format
 - [x] Expand format analyzers with deeper PASEQ, quest/mission table, hash, and typed record parsers
-- [ ] Add repeat-run confidence rollups across multiple target captures
+- [x] Add repeat-run confidence rollups across multiple target captures
 - [ ] Add one-click extraction for the archive entry behind a selected archive correlation match
 - [ ] Add JSON schema validation gates through a `--validate-schemas` flag and optional environment variable
 - [ ] Add DMM conflict/overlap checking for generated patches against existing DMM mod JSON
