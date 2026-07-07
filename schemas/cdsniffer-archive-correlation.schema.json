@@ -1,0 +1,290 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/cdsniffer-archive-correlation.schema.json",
+  "title": "CDSniffer Archive Correlation Output",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "created_at",
+    "capture_path",
+    "index_db",
+    "cache_dir",
+    "evidence_count",
+    "candidate_entry_count",
+    "decoded_entry_count",
+    "match_count",
+    "matches"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "capture_path": {
+      "type": "string"
+    },
+    "index_db": {
+      "type": "string"
+    },
+    "cache_dir": {
+      "type": "string"
+    },
+    "patterns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "path_terms": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "candidate_entry_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "decoded_entry_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "cache_hit_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "decode_error_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "raw_match_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "format_hint_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "match_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "matches": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/archive_match"
+      }
+    },
+    "decode_errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "error"],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "$defs": {
+    "archive_match": {
+      "type": "object",
+      "required": ["archive_path", "decoded_offset", "decoded_offset_hex", "original_bytes", "confidence", "patch_skeleton"],
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "relative_file": {
+          "type": "string"
+        },
+        "archive_path": {
+          "type": "string"
+        },
+        "cache_path": {
+          "type": "string"
+        },
+        "decoded_offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "decoded_offset_hex": {
+          "type": "string"
+        },
+        "paz_file": {
+          "type": "string"
+        },
+        "pamt_file": {
+          "type": "string"
+        },
+        "archive_offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "archive_offset_hex": {
+          "type": "string"
+        },
+        "compression_name": {
+          "type": ["string", "null"]
+        },
+        "compression_decoder": {
+          "type": ["string", "null"]
+        },
+        "decrypted": {
+          "type": "boolean"
+        },
+        "decompressed": {
+          "type": "boolean"
+        },
+        "match_type": {
+          "type": "string"
+        },
+        "evidence_id": {
+          "type": ["string", "null"]
+        },
+        "evidence_value": {
+          "type": ["string", "number", "integer", "boolean", "null"]
+        },
+        "hit_text": {
+          "type": ["string", "null"]
+        },
+        "snapshot_index": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "hit_index": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "runtime_address": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "runtime_address_hex": {
+          "type": ["string", "null"]
+        },
+        "module_rva": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "module_rva_hex": {
+          "type": ["string", "null"]
+        },
+        "original_bytes": {
+          "type": "string"
+        },
+        "context_hex": {
+          "type": "string"
+        },
+        "file_format": {
+          "type": ["string", "null"]
+        },
+        "format_confidence_bonus": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "format_hint_summary": {
+          "type": "string"
+        },
+        "format_hints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "confidence_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "diff_status": {
+          "type": "string",
+          "const": "uncompared"
+        },
+        "evidence_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "match_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence_values": {
+          "type": "array",
+          "items": {
+            "type": ["string", "number", "integer", "boolean", "null"]
+          }
+        },
+        "hit_texts": {
+          "type": "array",
+          "items": {
+            "type": ["string", "null"]
+          }
+        },
+        "snapshots": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "patch_skeleton": {
+          "type": "object",
+          "required": ["type", "file", "offset", "original", "replacement"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "bytes"
+            },
+            "file": {
+              "type": "string"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "original": {
+              "type": "string"
+            },
+            "replacement": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

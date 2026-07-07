@@ -11,6 +11,12 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from cd_sniffer.cli import build_comparison, load_signature_pack, timestamped_output_path
+from cd_sniffer.archive_index import (
+    build_archive_index,
+    correlate_capture_to_archive,
+    render_archive_correlation_markdown,
+    select_archive_entries,
+)
 from cd_sniffer.correlator import (
     correlate_capture_to_files,
     extract_evidence_from_capture,
@@ -562,6 +568,63 @@ class ScannerTests(unittest.TestCase):
             self.assertTrue(result["entries"][0]["validated"])
             self.assertFalse(result["entries"][0]["written"])
             self.assertFalse((output / "testpkg" / "data" / "mission.bin").exists())
+
+    def test_archive_index_builds_and_selects_synthetic_entry(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            pamt = write_synthetic_pamt(root, "data/mission.paseq", comp_size=18, orig_size=18, flags=0)
+            (root / "0.paz").write_bytes(b"Mission_Index_Test")
+            db_path = root / "archive-index.sqlite"
+
+            report = build_archive_index(db_path, [pamt], patterns=["*.paseq"])
+            entries = select_archive_entries(db_path, patterns=["*.paseq"])
+
+            self.assertEqual(report["indexed_count"], 1)
+            self.assertTrue(db_path.exists())
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0].path, "testpkg/data/mission.paseq")
+            self.assertEqual(entries[0].compression_name, "none")
+            self.assertEqual(entries[0].extension, ".paseq")
+
+    def test_archive_correlation_uses_lazy_decoded_cache(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            raw = b"xxxxMission_Ayyyy"
+            pamt = write_synthetic_pamt(root, "data/mission.paseq", comp_size=len(raw), orig_size=len(raw), flags=0)
+            (root / "0.paz").write_bytes(raw)
+            db_path = root / "archive-index.sqlite"
+            cache_dir = root / "cache"
+            capture = root / "capture.jsonl"
+            capture.write_text(json_line(capture_payload(["Mission_A"])), encoding="utf-8")
+
+            build_archive_index(db_path, [pamt], patterns=["*.paseq"])
+            first = correlate_capture_to_archive(
+                capture,
+                db_path,
+                cache_dir,
+                patterns=["*.paseq"],
+                max_entries=10,
+                max_total_matches=10,
+            )
+            second = correlate_capture_to_archive(
+                capture,
+                db_path,
+                cache_dir,
+                patterns=["*.paseq"],
+                max_entries=10,
+                max_total_matches=10,
+            )
+            md_text = render_archive_correlation_markdown(first)
+
+            self.assertGreaterEqual(first["raw_match_count"], 1)
+            self.assertEqual(first["candidate_entry_count"], 1)
+            self.assertEqual(first["decoded_entry_count"], 1)
+            self.assertEqual(first["match_count"], 1)
+            self.assertEqual(first["matches"][0]["archive_path"], "testpkg/data/mission.paseq")
+            self.assertEqual(first["matches"][0]["decoded_offset"], 4)
+            self.assertEqual(second["cache_hit_count"], 1)
+            self.assertTrue(Path(first["matches"][0]["cache_path"]).exists())
+            self.assertIn("# CDSniffer Archive Correlation Results", md_text)
 
     def test_paz_hashlittle_uses_documented_vector(self):
         self.assertEqual(hashlittle(b"rendererconfigurationmaterial.xml", 0x000C5EDE), 0xAF3DCEF3)

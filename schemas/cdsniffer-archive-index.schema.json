@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/cdsniffer-archive-index.schema.json",
+  "title": "CDSniffer Archive Index Report",
+  "type": "object",
+  "required": ["schema_version", "created_at", "db_path", "roots", "patterns", "indexed_count"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "db_path": {
+      "type": "string"
+    },
+    "roots": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "patterns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "indexed_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "compression_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "extension_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    }
+  },
+  "additionalProperties": false
+}

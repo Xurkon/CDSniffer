@@ -32,6 +32,8 @@ For compiled releases, the clean target is two executables:
 - Can compare baseline and target captures to highlight target-only file-offset candidates
 - Adds format-aware correlation hints for JSON/JSONL records, text line locations, PASEQ candidates, nearby strings, and little-endian integers
 - Can parse PAMT indexes and extract/validate/decode PAZ archive entries without launching an external unpacker
+- Can build a reusable SQLite PAMT/PAZ archive index for fast repeated lookups after a game patch
+- Can correlate captures directly against indexed archive entries with a lazy decoded-entry cache
 - Can gate captures until camp mission UI sentinel strings are present in memory
 - Can write only new unique hit text values during a capture session
 - Searches captured payloads from the CLI and the GUI
@@ -196,12 +198,26 @@ Validate decode coverage without writing extracted files:
 python -m cd_sniffer --archive-extract --archive-validate --archive-root "C:\Program Files (x86)\Steam\steamapps\common\Crimson Desert" --archive-filter "*.paseq" --archive-limit 500 --archive-format json --archive-report-output logs\archive-validate-paseq.json
 ```
 
+Build a reusable archive index:
+
+```powershell
+python -m cd_sniffer --archive-index --archive-root "C:\Program Files (x86)\Steam\steamapps\common\Crimson Desert" --archive-filter "*.paseq" --archive-filter "*.json" --archive-index-db logs\cdsniffer-archive-index.sqlite --archive-format markdown --archive-report-output logs\archive-index.md
+```
+
+Correlate a capture directly against indexed archive entries:
+
+```powershell
+python -m cd_sniffer --correlate-archive logs\camp-mission.jsonl --correlate-archive-index logs\cdsniffer-archive-index.sqlite --correlate-archive-cache logs\archive-cache --correlate-archive-glob "*.paseq" --correlate-archive-term mission --correlate-format markdown --correlate-output logs\archive-correlation.md
+```
+
 Useful archive options:
 
 - `--archive-root` points to the game root, an archive folder, or a specific `.pamt` file and can be repeated
 - `--archive-paz-dir` points to the matching `.paz` directory when listing a standalone `.pamt`
 - `--archive-list` parses PAMT indexes and reports archive entries without extracting
 - `--archive-extract` extracts matching entries to `--archive-output`
+- `--archive-index` builds a reusable SQLite metadata index for later capture-to-archive correlation
+- `--archive-index-db` controls where the SQLite archive index is written
 - `--archive-filter` filters by entry path glob or substring and can be repeated
 - `--archive-limit` caps list or extract operations
 - `--archive-all` is required when extracting everything without a filter or limit
@@ -210,6 +226,17 @@ Useful archive options:
 - `--archive-validate` reads, decrypts, and decodes entries without writing decoded files
 - `--archive-format json|csv|markdown` controls report format
 - `--archive-report-output` writes the archive report to a file
+
+Useful archive correlation options:
+
+- `--correlate-archive` points to a CDSniffer JSON or JSONL capture to compare against indexed archive entries
+- `--correlate-archive-index` points to the SQLite archive index; if omitted, CDSniffer uses `--archive-index-db`
+- `--correlate-archive-cache` stores decoded archive entries so repeated searches do not decode the same PAZ payload again
+- `--correlate-archive-glob` limits candidate archive paths by glob and can be repeated
+- `--correlate-archive-term` limits candidate archive paths by substring and can be repeated
+- `--correlate-archive-max-entries` caps how many archive entries are decoded in one run
+- `--correlate-archive-no-decrypt` keeps XML payloads encrypted during archive correlation
+- `--correlate-max-matches`, `--correlate-max-matches-per-evidence`, `--correlate-context-bytes`, `--correlate-no-numeric`, `--correlate-no-format-hints`, `--correlate-format`, and `--correlate-output` also apply to archive correlation
 
 Archive decode notes:
 
@@ -261,6 +288,15 @@ Correlation results include:
 - Confidence score
 - A generic byte patch skeleton with file, offset, original bytes, and empty replacement bytes
 
+Archive correlation results include the same evidence and confidence fields, plus:
+
+- `archive_path`, the original path inside the PAZ/PAMT archive
+- `decoded_offset`, the byte offset inside the decoded entry that a DMM-style file patch should usually target
+- `archive_offset`, the stored byte offset inside the PAZ container for provenance only
+- `paz_file` and `pamt_file`, so the source archive can be verified
+- `compression_name`, `compression_decoder`, `decrypted`, and `decompressed`, so users can see how the cache entry was produced
+- `cache_path`, the decoded file CDSniffer searched for that specific archive entry
+
 Search the live GUI capture:
 
 - Use the search box on the `Real-Time` tab
@@ -271,6 +307,8 @@ Search the live GUI capture:
 - Use the embedded terminal with `search-export [path]` and `search-import [path]` to manage search presets
 - Use the embedded terminal with `correlate <capture> <root> [json|csv|markdown]` to run a compact file-offset report
 - Use the embedded terminal with `correlate-diff <baseline> <target> <root> [json|csv|markdown]` to compare before/after captures
+- Use the embedded terminal with `archive-index <archive-root> <index-db> [glob...]` to build a reusable archive index
+- Use the embedded terminal with `correlate-archive <capture> <index-db> <cache-dir> [json|csv|markdown] [glob...]` to correlate a capture against indexed game archives
 - Matching text is highlighted directly in the live raw snapshot view
 - Use the `Recent` dropdown to reuse previous searches
 - Use the saved-search controls to store and restore named search presets
@@ -299,12 +337,15 @@ The most reliable way to get the exact data you want is:
 8. Use `--include-regex` to focus on families you already know, and `--exclude-regex` to filter noisy quest or story strings.
 9. Use `--archive-list` to find likely mission/table entries inside the game PAZ/PAMT archives.
 10. Use `--archive-extract --archive-validate` first to prove the focused subset can be read/decrypted/decoded without writing files.
-11. Use `--archive-extract` to decode only the focused subset you need into a clean working folder.
-12. Compare the resulting strings against decoded `questgaugeinfo`, `questinfo`, and `missioninfo` style tables and keep only the entries that consistently show up in the correct camp UI.
-13. Run `--correlate-baseline` plus `--correlate-target` against the decoded file tree and inspect `target-only` rows first.
-14. Prefer rows with format hints that point to JSON record keys, mission-like tables, PASEQ candidates, or nearby little-endian values.
-15. Prefer module-relative `module_rva` over absolute `address` whenever it is available; absolute addresses can shift between launches.
-16. If a string appears in multiple game systems, prefer the one that is unique to the camp/dispatch screen over one that also appears in player quests.
+11. Build a reusable `--archive-index` for likely file families, such as `*.paseq`, `*.json`, `*.xml`, and mission-related path terms.
+12. Run `--correlate-archive` with focused globs/path terms and inspect the highest-confidence decoded offsets first.
+13. Use the decoded cache path from the archive-correlation report when you need to manually inspect one candidate file.
+14. Use `--archive-extract` to decode only the focused subset you need into a clean working folder when manual review needs full folders.
+15. Compare the resulting strings against decoded `questgaugeinfo`, `questinfo`, and `missioninfo` style tables and keep only the entries that consistently show up in the correct camp UI.
+16. Run `--correlate-baseline` plus `--correlate-target` against a decoded file tree when you specifically need before/after diff status.
+17. Prefer rows with format hints that point to JSON record keys, mission-like tables, PASEQ candidates, or nearby little-endian values.
+18. Prefer module-relative `module_rva` over absolute `address` whenever it is available; absolute addresses can shift between launches.
+19. If a string appears in multiple game systems, prefer the one that is unique to the camp/dispatch screen over one that also appears in player quests.
 
 In practice, that means the best workflow is to:
 
@@ -347,6 +388,7 @@ python -m cd_sniffer --mode hotkey --hotkey F8 --window-title "Crimson Desert" -
 Good next steps before opening this up more broadly:
 
 - Add exact GUI smoke tests with the `PySide6` extra installed
+- Add a dedicated GUI tab for archive index search and live archive-correlation results
 - Add DMM-specific patch emitters on top of the generic correlation patch skeletons
 - Expand format analyzers with deeper PASEQ, quest/mission table, hash, and typed record parsers
 - Add sample-driven decoders for any future proprietary PAZ compression payloads that are not raw, zlib, or LZ4
@@ -366,6 +408,8 @@ Good next steps before opening this up more broadly:
 - The JSON schema for capture output lives in `schemas/cdsniffer-output.schema.json`.
 - The JSON schema for correlation output lives in `schemas/cdsniffer-correlation.schema.json`.
 - The JSON schema for archive list/extract output lives in `schemas/cdsniffer-archive.schema.json`.
+- The JSON schema for archive index output lives in `schemas/cdsniffer-archive-index.schema.json`.
+- The JSON schema for archive correlation output lives in `schemas/cdsniffer-archive-correlation.schema.json`.
 - The detailed project history lives in `CHANGELOG.md`.
 - The GUI is optional and needs `pip install .[gui]`.
 - Encrypted XML and LZ4 archive decoding need `pip install .[unpack]`; PAMT listing, raw pass-through, and zlib extraction use the standard library.

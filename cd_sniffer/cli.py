@@ -7,6 +7,14 @@ import sys
 import time
 from typing import Any
 
+from .archive_index import (
+    build_archive_index,
+    correlate_capture_to_archive,
+    render_archive_correlation_csv,
+    render_archive_correlation_markdown,
+    render_archive_index_csv,
+    render_archive_index_markdown,
+)
 from .correlator import (
     correlate_capture_to_files,
     render_correlation_csv,
@@ -148,10 +156,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--correlate-no-format-hints", action="store_false", dest="correlate_format_hints", default=True, help="Skip JSON/text/binary format hints during correlation")
     parser.add_argument("--correlate-format", choices=["json", "csv", "markdown"], default="json", help="Format used for correlation results")
     parser.add_argument("--correlate-output", help="Optional file path to write correlation results instead of printing them")
+    parser.add_argument("--correlate-archive", help="Capture JSON/JSONL file to correlate against indexed PAMT/PAZ archive entries")
+    parser.add_argument("--correlate-archive-index", help="Archive index database to use; defaults to --archive-index-db")
+    parser.add_argument("--correlate-archive-cache", default="logs/archive-cache", help="Decoded archive cache directory for archive correlation")
+    parser.add_argument("--correlate-archive-glob", action="append", dest="correlate_archive_globs", help="Archive entry glob to include during archive correlation; may be repeated")
+    parser.add_argument("--correlate-archive-term", action="append", dest="correlate_archive_terms", help="Archive path substring to include during archive correlation; may be repeated")
+    parser.add_argument("--correlate-archive-max-entries", type=int, default=2000, help="Maximum indexed archive entries to decode during archive correlation")
+    parser.add_argument("--correlate-archive-no-decrypt", action="store_true", help="Do not decrypt XML entries while correlating against archive entries")
     parser.add_argument("--archive-root", action="append", dest="archive_roots", help="Game/archive root or .pamt file to inspect; may be repeated")
     parser.add_argument("--archive-paz-dir", help="Directory containing .paz files when --archive-root is a standalone .pamt")
     parser.add_argument("--archive-list", action="store_true", help="List PAMT/PAZ entries using the built-in parser")
     parser.add_argument("--archive-extract", action="store_true", help="Extract matching PAMT/PAZ entries using the built-in unpacker")
+    parser.add_argument("--archive-index", action="store_true", help="Build a reusable SQLite index of PAMT/PAZ archive entries")
+    parser.add_argument("--archive-index-db", default="logs/cdsniffer-archive-index.sqlite", help="SQLite database path used by --archive-index and archive correlation")
     parser.add_argument("--archive-filter", action="append", dest="archive_filters", help="Archive entry glob or substring filter; may be repeated")
     parser.add_argument("--archive-limit", type=int, help="Maximum archive entries to list or extract")
     parser.add_argument("--archive-all", action="store_true", help="Allow extracting all matched entries when no filter or limit is supplied")
@@ -244,6 +261,49 @@ def main() -> int:
     if args.list_windows:
         return list_windows(args)
 
+    if args.archive_index:
+        if not args.archive_roots:
+            print("--archive-root is required with --archive-index")
+            return 1
+        if args.archive_limit is not None and args.archive_limit < 1:
+            print("--archive-limit must be at least 1")
+            return 1
+        archive_roots = [Path(item) for item in args.archive_roots]
+        paz_dir = Path(args.archive_paz_dir) if args.archive_paz_dir else None
+        for archive_root in archive_roots:
+            if not archive_root.exists():
+                print(f"Archive root not found: {archive_root}")
+                return 1
+        if paz_dir is not None and not paz_dir.exists():
+            print(f"Archive PAZ directory not found: {paz_dir}")
+            return 1
+        try:
+            result = build_archive_index(
+                Path(args.archive_index_db),
+                archive_roots,
+                paz_dir=paz_dir,
+                patterns=args.archive_filters,
+                limit=args.archive_limit,
+            )
+        except Exception as exc:
+            print(f"Archive index failed: {exc}")
+            return 1
+
+        if args.archive_format == "csv":
+            rendered = render_archive_index_csv(result)
+        elif args.archive_format == "markdown":
+            rendered = render_archive_index_markdown(result)
+        else:
+            rendered = json.dumps(result, ensure_ascii=False, indent=2)
+        if args.archive_report_output:
+            out_path = Path(args.archive_report_output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(rendered, encoding="utf-8")
+            print(json.dumps({"written": str(out_path), "format": args.archive_format}, ensure_ascii=False, indent=2))
+        else:
+            print(rendered)
+        return 0
+
     if args.archive_list or args.archive_extract:
         if not args.archive_roots:
             print("--archive-root is required with --archive-list or --archive-extract")
@@ -301,6 +361,62 @@ def main() -> int:
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(rendered, encoding="utf-8")
             print(json.dumps({"written": str(out_path), "format": args.archive_format}, ensure_ascii=False, indent=2))
+        else:
+            print(rendered)
+        return 0
+
+    if args.correlate_archive:
+        capture_path = Path(args.correlate_archive)
+        index_path = Path(args.correlate_archive_index or args.archive_index_db)
+        cache_path = Path(args.correlate_archive_cache)
+        if not capture_path.exists():
+            print(f"Capture file not found: {capture_path}")
+            return 1
+        if not index_path.exists():
+            print(f"Archive index not found: {index_path}. Build it first with --archive-index.")
+            return 1
+        if args.correlate_archive_max_entries < 1:
+            print("--correlate-archive-max-entries must be at least 1")
+            return 1
+        if args.correlate_max_matches < 1:
+            print("--correlate-max-matches must be at least 1")
+            return 1
+        if args.correlate_max_matches_per_evidence < 1:
+            print("--correlate-max-matches-per-evidence must be at least 1")
+            return 1
+        if args.correlate_context_bytes < 0:
+            print("--correlate-context-bytes cannot be negative")
+            return 1
+        try:
+            result = correlate_capture_to_archive(
+                capture_path,
+                index_path,
+                cache_path,
+                patterns=args.correlate_archive_globs,
+                path_terms=args.correlate_archive_terms,
+                max_entries=args.correlate_archive_max_entries,
+                max_matches_per_evidence=args.correlate_max_matches_per_evidence,
+                max_total_matches=args.correlate_max_matches,
+                include_numeric=args.correlate_numeric,
+                context_bytes=args.correlate_context_bytes,
+                include_format_hints=args.correlate_format_hints,
+                decrypt_xml=not args.correlate_archive_no_decrypt,
+            )
+        except Exception as exc:
+            print(f"Archive correlation failed: {exc}")
+            return 1
+
+        if args.correlate_format == "csv":
+            rendered = render_archive_correlation_csv(result)
+        elif args.correlate_format == "markdown":
+            rendered = render_archive_correlation_markdown(result)
+        else:
+            rendered = json.dumps(result, ensure_ascii=False, indent=2)
+        if args.correlate_output:
+            out_path = Path(args.correlate_output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(rendered, encoding="utf-8")
+            print(json.dumps({"written": str(out_path), "format": args.correlate_format}, ensure_ascii=False, indent=2))
         else:
             print(rendered)
         return 0

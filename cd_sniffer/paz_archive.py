@@ -306,16 +306,7 @@ def extract_entry(
     if len(data) != read_size:
         raise ArchiveError(f"Short read for {entry.path}: expected {read_size}, got {len(data)}")
 
-    decrypted = False
-    decompressed = False
-    compression_decoder = "passthrough"
-    if decrypt_xml and entry.encrypted:
-        data = decrypt(data, Path(entry.path).name)
-        decrypted = True
-
-    if entry.needs_decompression:
-        data, compression_decoder = decode_compression(data, entry.compression_type, entry.orig_size)
-        decompressed = compression_decoder not in {"passthrough", "raw"}
+    data, decode_info = decode_entry_bytes(entry, data, decrypt_xml=decrypt_xml)
 
     out_path = safe_output_path(output_dir, entry.path)
     if write_output and out_path.exists() and not overwrite:
@@ -328,11 +319,46 @@ def extract_entry(
         "entry": entry.to_dict(),
         "output_path": str(out_path),
         "size": len(data),
-        "decrypted": decrypted,
-        "decompressed": decompressed,
-        "compression_decoder": compression_decoder,
+        "decrypted": decode_info["decrypted"],
+        "decompressed": decode_info["decompressed"],
+        "compression_decoder": decode_info["compression_decoder"],
         "written": write_output,
         "file_format": out_path.suffix.lower().lstrip(".") or "binary",
+    }
+
+
+def read_entry_bytes(entry: PazEntry) -> bytes:
+    paz_path = Path(entry.paz_file)
+    if not paz_path.exists():
+        raise FileNotFoundError(f"PAZ file not found: {paz_path}")
+
+    read_size = entry.comp_size if entry.comp_size > 0 else entry.orig_size
+    with paz_path.open("rb") as handle:
+        handle.seek(entry.offset)
+        data = handle.read(read_size)
+    if len(data) != read_size:
+        raise ArchiveError(f"Short read for {entry.path}: expected {read_size}, got {len(data)}")
+    return data
+
+
+def decode_entry_bytes(entry: PazEntry, data: bytes | None = None, *, decrypt_xml: bool = True) -> tuple[bytes, dict[str, Any]]:
+    decoded = read_entry_bytes(entry) if data is None else data
+    decrypted = False
+    compression_decoder = "passthrough"
+
+    if decrypt_xml and entry.encrypted:
+        decoded = decrypt(decoded, Path(entry.path).name)
+        decrypted = True
+
+    if entry.needs_decompression:
+        decoded, compression_decoder = decode_compression(decoded, entry.compression_type, entry.orig_size)
+
+    return decoded, {
+        "size": len(decoded),
+        "decrypted": decrypted,
+        "decompressed": compression_decoder not in {"passthrough", "raw"},
+        "compression_decoder": compression_decoder,
+        "file_format": Path(entry.path).suffix.lower().lstrip(".") or "binary",
     }
 
 

@@ -10,6 +10,13 @@ import threading
 from pathlib import Path
 from typing import Any, Callable
 
+from .archive_index import (
+    build_archive_index,
+    correlate_capture_to_archive,
+    render_archive_correlation_csv,
+    render_archive_correlation_markdown,
+    render_archive_index_markdown,
+)
 from .correlator import correlate_capture_to_files, render_correlation_csv, render_correlation_markdown
 
 try:
@@ -2398,8 +2405,11 @@ class MainWindow(QMainWindow):
             return (
                 "Commands: help, status, start, stop, settings, show, hide, tab <name>, "
                 "search <query>, search-clear, search-export [path], search-import [path], "
+                "archive-index <archive-root> <index-db> [glob...], "
                 "correlate <capture> <root> [json|csv|markdown], "
-                "correlate-diff <baseline> <target> <root> [json|csv|markdown], apply <json>, refresh"
+                "correlate-diff <baseline> <target> <root> [json|csv|markdown], "
+                "correlate-archive <capture> <index-db> <cache-dir> [json|csv|markdown] [glob...], "
+                "apply <json>, refresh"
             )
         if command == "status":
             state = self.ipc_state_snapshot()
@@ -2466,6 +2476,19 @@ class MainWindow(QMainWindow):
                 return f"Search state imported from {source}."
             except Exception as exc:
                 return f"Import failed: {exc}"
+        if command == "archive-index":
+            if len(parts) < 3:
+                return "Usage: archive-index <archive-root> <index-db> [glob...]"
+            archive_root = Path(parts[1])
+            index_db = Path(parts[2])
+            patterns = parts[3:] or None
+            if not archive_root.exists():
+                return f"Archive root not found: {archive_root}"
+            try:
+                result = build_archive_index(index_db, [archive_root], patterns=patterns)
+                return render_archive_index_markdown(result)
+            except Exception as exc:
+                return f"Archive index failed: {exc}"
         if command == "correlate":
             if len(parts) < 3:
                 return "Usage: correlate <capture.jsonl> <unpacked-root> [json|csv|markdown]"
@@ -2492,6 +2515,39 @@ class MainWindow(QMainWindow):
                 return render_correlation_markdown(result)
             except Exception as exc:
                 return f"Correlation failed: {exc}"
+        if command == "correlate-archive":
+            if len(parts) < 4:
+                return "Usage: correlate-archive <capture.jsonl> <index-db> <cache-dir> [json|csv|markdown] [glob...]"
+            capture_path = Path(parts[1])
+            index_db = Path(parts[2])
+            cache_dir = Path(parts[3])
+            output_format = "markdown"
+            pattern_start = 4
+            if len(parts) > 4 and parts[4].lower() in {"json", "csv", "markdown"}:
+                output_format = parts[4].lower()
+                pattern_start = 5
+            patterns = parts[pattern_start:] or None
+            if not capture_path.exists():
+                return f"Capture file not found: {capture_path}"
+            if not index_db.exists():
+                return f"Archive index not found: {index_db}"
+            try:
+                result = correlate_capture_to_archive(
+                    capture_path,
+                    index_db,
+                    cache_dir,
+                    patterns=patterns,
+                    max_entries=1000,
+                    max_total_matches=50,
+                    max_matches_per_evidence=10,
+                )
+                if output_format == "json":
+                    return json.dumps(result, ensure_ascii=False, indent=2)
+                if output_format == "csv":
+                    return render_archive_correlation_csv(result)
+                return render_archive_correlation_markdown(result)
+            except Exception as exc:
+                return f"Archive correlation failed: {exc}"
         if command == "correlate-diff":
             if len(parts) < 4:
                 return "Usage: correlate-diff <baseline.jsonl> <target.jsonl> <unpacked-root> [json|csv|markdown]"

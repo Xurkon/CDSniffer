@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added reusable SQLite archive indexing with `--archive-index` so PAMT/PAZ metadata can be searched repeatedly without reparsing every archive
+- Added archive-to-capture correlation with `--correlate-archive`, lazy decoded-entry caching, archive path filters, decoded offsets, original bytes, evidence trails, confidence scores, and generic patch skeletons
+- Added GUI terminal commands for `archive-index` and `correlate-archive`
+- Added JSON schemas for archive index and archive correlation reports
 - Added archive decode validation with `--archive-validate` so PAZ entries can be read, decrypted, and decoded without writing extracted files
 - Added compression type `1` raw-asset pass-through and adaptive compression type `3` handling that probes raw, zlib, and LZ4 payloads while reporting unsupported proprietary samples cleanly
 - Added built-in PAMT/PAZ archive listing and extraction commands so CDSniffer can unpack/decode game files without external unpacker executables
