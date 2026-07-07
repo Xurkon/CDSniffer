@@ -114,6 +114,38 @@ Install the GUI extra if needed:
 pip install .[gui]
 ```
 
+## GUI Quick Start
+
+Use the GUI when you want a guided workflow, live capture search, archive comparison, or one-click exports.
+
+1. Start Crimson Desert.
+2. Launch `cdsniffer-gui`.
+3. Check the `Capture` tab status. It should show `Game Detected` in green when the game is found, or `Game not detected` if CDSniffer cannot see it yet.
+4. Click `Refresh Window List` if the game was started after the GUI, or `Pick Window` only when auto-detection is ambiguous.
+5. Click `Settings`, then choose the capture behavior you want.
+6. For camp mission research, start with `Mode: hotkey`, `Hotkey: F8`, `Capture Gate: camp-mission`, `Unique only: on`, `Context Bytes: 64`, and `Decode context numbers: on`.
+7. Open the game screen you want to study, press the hotkey, and inspect the `Real-Time` tab.
+8. Use the `Real-Time` search box to search the current capture without changing the saved payload.
+9. Use the `Search` tab to search older capture logs across a folder.
+10. Use the `Archives` tab to build an archive index, search decoded game entries, correlate a capture against indexed archives, or compare a capture with one selected decoded file.
+11. Select a correlation row to preview decoded bytes, printable context, evidence metadata, and a patch skeleton.
+12. Export a DMM draft only after reviewing high-confidence matches, then run a DMM conflict check before using the patch.
+
+Most GUI controls include short hover tips. Hover any setting or action button when you need a quick reminder of what it changes and when to use it.
+
+Recommended first GUI settings for camp mission work:
+
+- `Mode`: `hotkey`
+- `Hotkey`: `F8`
+- `Capture Gate`: `camp-mission`
+- `Gate Match`: `any`
+- `Unique only`: enabled
+- `Context Bytes`: `64`
+- `Decode context numbers`: enabled
+- `Summary`: `top-hits`
+- `Timestamp output`: enabled
+- `Export manifest`: enabled
+
 Install archive decode extras if you need encrypted XML or LZ4 entries:
 
 ```powershell
@@ -455,6 +487,7 @@ The GUI uses the same backend as the CLI, so captures, manifests, comparisons, a
 The GUI also includes:
 
 - A dedicated settings dialog for the full configuration set
+- Hover tips for settings, capture controls, search controls, archive workflows, and preset actions
 - IPC handling so the CLI can start, stop, show, hide, and retarget the GUI
 - A read-only capture dashboard so the main tab stays clean
 - A live search box on the `Real-Time` tab that filters the current capture in place

@@ -304,6 +304,12 @@ def load_app_icon() -> QIcon:
         return QIcon(str(resolved))
 
 
+def set_widget_tips(items: list[tuple[Any, str]]) -> None:
+    for widget, tip in items:
+        widget.setToolTip(tip)
+        widget.setStatusTip(tip)
+
+
 class SettingsDialog(QDialog):
     def __init__(self, parent: QWidget | None, settings: dict[str, Any]) -> None:
         super().__init__(parent)
@@ -328,6 +334,7 @@ class SettingsDialog(QDialog):
         self.build_filters_tab()
         self.build_advanced_tab()
         self.build_behavior_tab()
+        self.apply_tooltips()
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
@@ -513,6 +520,62 @@ class SettingsDialog(QDialog):
         form.addRow("", self.tray_notifications)
         form.addRow("Tray click action", self.tray_click_behavior)
         form.addRow(notifications_box)
+
+    def apply_tooltips(self) -> None:
+        set_widget_tips(
+            [
+                (self.mode, "Choose once for one snapshot, loop for repeated captures, or hotkey to capture only when the configured key is pressed."),
+                (self.hotkey, "Key used in hotkey mode. F8 is the default because it is unlikely to conflict with the game UI."),
+                (self.interval, "Seconds between loop captures and hotkey polling checks."),
+                (self.captures, "Maximum snapshots before stopping. Leave at Unlimited for manual stop or long-running sessions."),
+                (self.output, "Capture log path. JSONL is best for repeated captures because each snapshot is appended as one line."),
+                (self.timestamp_output, "Create a fresh timestamped log file for each session so earlier evidence is not overwritten."),
+                (self.session_name, "Filename prefix used when timestamped output is enabled."),
+                (self.format, "Output format. Use JSONL for capture logs, CSV/Markdown for sharing, and JSON for structured automation."),
+                (self.label, "Short label stored with each capture to describe what screen or test case produced it."),
+                (self.game_version, "Optional game version note stored in capture metadata for patch-to-patch comparison."),
+                (self.capture_gate, "Wait for target UI sentinel strings before recording. Camp mission mode reduces unrelated gameplay noise."),
+                (self.capture_gate_match, "Choose whether any gate sentinel or every configured sentinel must be present before capture."),
+                (self.unique_only, "Skip hit text already seen earlier in this session to reduce repeated log spam."),
+                (self.include_keywords, "Literal text fragments to include in captures. Add one keyword per line."),
+                (self.exclude_keywords, "Literal text fragments to suppress when they create noisy or unrelated hits."),
+                (self.include_patterns, "Regex patterns for hits to include. Use when a family of values shares a predictable shape."),
+                (self.exclude_patterns, "Regex patterns for hits to remove from results."),
+                (self.signature_packs, "Paths to shared keyword or regex packs. Add one file path per line."),
+                (self.watch_patterns, "Regex patterns that trigger watch alerts when they appear in a capture."),
+                (self.gate_keywords, "Custom literal sentinel strings used by the custom capture gate."),
+                (self.gate_patterns, "Custom regex sentinel patterns used by the custom capture gate."),
+                (self.notes, "Freeform notes saved into session metadata so results can be understood later."),
+                (self.window_filter_patterns, "Regex filters for target window titles when process lookup finds multiple candidates."),
+                (self.max_region_size, "Skip readable memory regions larger than this many bytes to avoid expensive scans."),
+                (self.max_regions, "Maximum matching memory regions to scan per capture. Unlimited is most complete but slower."),
+                (self.max_hits_per_region, "Maximum string hits to keep from each region. Use this to limit very noisy pages."),
+                (self.context_bytes, "Bytes before and after each hit to save for hex, offset, and nearby-ID analysis."),
+                (self.decode_context_numbers, "Decode nearby unsigned integer candidates from captured byte context."),
+                (self.context_number_radius, "How far from each hit CDSniffer searches for nearby numeric candidates."),
+                (self.gate_max_regions, "Maximum regions scanned during the lightweight capture-gate pre-check."),
+                (self.gate_max_hits_per_region, "Maximum gate hits kept per region during the pre-check."),
+                (self.summary, "Optional console summary after each capture. Top hits is useful during live testing."),
+                (self.summary_limit, "Number of rows included in the capture summary."),
+                (self.compare_last, "Compare each snapshot to the previous snapshot in the same session."),
+                (self.compare_limit, "Maximum added or removed strings to list in snapshot comparisons."),
+                (self.export_manifest, "Write a sidecar JSON manifest containing the exact settings used for the session."),
+                (self.quiet, "Reduce console and log chatter for automation or cleaner output."),
+                (self.verbose, "Print extra diagnostics while troubleshooting targeting, capture, or archive workflows."),
+                (self.tray_enabled, "Show a tray icon for quick show/hide and capture controls."),
+                (self.tray_start_hidden, "Launch the GUI hidden in the tray instead of opening the main window."),
+                (self.tray_minimize_to_tray, "Keep CDSniffer running in the tray when the window is minimized or closed."),
+                (self.tray_notifications, "Enable tray popups for selected capture and game-detection events."),
+                (self.tray_click_behavior, "Choose what happens when the tray icon is clicked: toggle window, show window, or open menu."),
+                (self.tray_notify_game_detected, "Notify when Crimson Desert is detected and ready to capture."),
+                (self.tray_notify_game_lost, "Notify when the target game process is no longer detected."),
+                (self.tray_notify_capture_started, "Notify when a capture session starts."),
+                (self.tray_notify_capture_stopped, "Notify when a capture session stops."),
+                (self.tray_notify_relinked, "Notify when CDSniffer automatically attaches to a restarted game PID."),
+                (self.tray_notify_errors, "Notify when capture or archive operations report errors."),
+                (self.tray_notify_capture_complete, "Notify when a planned capture batch reaches its configured count."),
+            ]
+        )
 
     def settings_dict(self) -> dict[str, Any]:
         return {
@@ -1021,6 +1084,7 @@ class MainWindow(QMainWindow):
         self.freshness_timer = QTimer(self)
         self.freshness_timer.timeout.connect(self.update_freshness_view)
         self.freshness_timer.start(1000)
+        self.apply_main_tooltips()
 
     def build_capture_tab(self) -> None:
         layout = QVBoxLayout(self.capture_tab)
@@ -1208,6 +1272,108 @@ class MainWindow(QMainWindow):
         self.notes_edit = QPlainTextEdit()
         self.notes_edit.setPlaceholderText("Optional session notes")
         self._apply_default_settings()
+
+    def apply_main_tooltips(self) -> None:
+        tips = {
+            "start_button": "Start capturing with the current settings shown in the dashboard.",
+            "stop_button": "Stop the active capture session.",
+            "refresh_button": "Refresh Crimson Desert detection and update the game status indicator.",
+            "pick_window_button": "Manually choose a target window when auto-detection is ambiguous.",
+            "settings_button": "Open the full settings dialog for capture, filters, advanced scan limits, and tray behavior.",
+            "import_profile_button": "Load a saved settings profile JSON into the current GUI session.",
+            "export_profile_button": "Save the current GUI settings as a reusable profile JSON.",
+            "settings_preview": "Read-only summary of the current capture configuration. Use Settings to edit values.",
+            "target_status": "Shows whether Crimson Desert is currently detected and ready for capture.",
+            "process_edit": "Process name fragment used for auto-detection. The default targets Crimson Desert.",
+            "window_title_edit": "Optional window title fragment used if process lookup needs help.",
+            "window_filter_edit": "Regex window-title filter used to narrow ambiguous target windows.",
+            "pid_edit": "Optional exact process ID. Leave blank to auto-detect Crimson Desert.",
+            "live_search_edit": "Search within the current real-time capture without changing the saved capture payload.",
+            "live_search_history_combo": "Recent live searches for quick reuse.",
+            "live_search_regex_check": "Treat the live search query as a regular expression.",
+            "live_search_case_check": "Require exact casing when searching the current capture.",
+            "live_search_filter_table_check": "Show only matching rows in the top-hits table while searching.",
+            "live_search_name_edit": "Name used when saving the current live search as a preset.",
+            "saved_search_combo": "Saved live-search presets stored in your local CDSniffer profile.",
+            "save_search_button": "Save the current live search query and options.",
+            "apply_saved_search_button": "Apply the selected saved live-search preset.",
+            "delete_saved_search_button": "Delete the selected saved live-search preset.",
+            "export_search_state_button": "Export live-search history and saved searches for sharing or backup.",
+            "import_search_state_button": "Import live-search history and saved searches from a JSON file.",
+            "clear_search_button": "Clear the live search and show the full current capture.",
+            "folder_search_path_edit": "Folder containing CDSniffer JSON or JSONL capture logs to search.",
+            "folder_search_query_edit": "Text or regex to find in stored capture logs.",
+            "folder_search_recursive_check": "Search subfolders under the selected capture-log folder.",
+            "folder_search_regex_check": "Treat the folder search query as a regular expression.",
+            "folder_search_case_check": "Require exact casing for folder search matches.",
+            "folder_search_format_combo": "Format used when exporting folder-search results.",
+            "folder_search_limit_spin": "Maximum number of folder-search matches to collect.",
+            "folder_search_button": "Search saved capture logs using the selected query and filters.",
+            "folder_search_export_button": "Export the latest folder-search results.",
+            "folder_search_filter_edit": "Filter visible folder-search result rows without rerunning the search.",
+            "correlation_guide_mode_combo": "Pick the archive/correlation workflow step you want the guided button to run.",
+            "correlation_guide_run_button": "Run the selected guided archive or correlation step.",
+            "archive_root_edit": "Crimson Desert install folder, archive folder, or standalone .pamt file to index.",
+            "archive_index_db_edit": "SQLite archive index file to create or reuse.",
+            "archive_paz_dir_edit": "Optional PAZ folder used when the archive root is a standalone .pamt file.",
+            "archive_patterns_edit": "Archive entry globs to index, one per line. Keep this focused for faster searches.",
+            "archive_index_limit_spin": "Maximum archive entries to index. No limit is most complete but slower.",
+            "archive_browse_root_button": "Choose the game install folder, archive folder, or .pamt file.",
+            "archive_browse_index_button": "Choose where the SQLite archive index is stored.",
+            "archive_build_index_button": "Build or refresh the archive index after a game update or filter change.",
+            "archive_export_index_button": "Export the latest archive index summary report.",
+            "archive_search_terms_edit": "Comma-separated path terms used to search indexed archive entries.",
+            "archive_search_globs_edit": "Comma-separated archive path globs used to limit index search results.",
+            "archive_search_limit_spin": "Maximum archive index search rows to return.",
+            "archive_search_filter_edit": "Filter visible archive index rows without rerunning the search.",
+            "archive_search_button": "Search the SQLite archive index before decoding or correlating.",
+            "archive_capture_edit": "CDSniffer capture log to compare against archive, folder, or selected-file data.",
+            "archive_baseline_capture_edit": "Optional before-state capture used to rank target-only matches higher.",
+            "archive_cache_dir_edit": "Folder where archive correlation stores lazily decoded game files.",
+            "archive_correlation_root_edit": "Decoded or unpacked folder used by folder correlation.",
+            "archive_selected_file_edit": "One decoded or unpacked file to compare directly against the selected capture.",
+            "archive_correlation_globs_edit": "Globs that limit archive or folder correlation candidates.",
+            "archive_correlation_terms_edit": "Archive path terms that narrow archive correlation before decoding.",
+            "archive_correlation_max_entries_spin": "Maximum archive entries to decode and scan in one correlation run.",
+            "archive_correlation_max_matches_spin": "Maximum total correlation matches to return.",
+            "archive_correlation_max_per_evidence_spin": "Maximum offsets returned for one captured evidence value.",
+            "archive_correlation_context_spin": "Bytes around each file match to include in correlation output.",
+            "archive_correlation_numeric_check": "Include decoded numeric candidates from captured byte context in correlation.",
+            "archive_correlation_hints_check": "Add format-specific hints for JSON, text, PASEQ, hashes, and nearby values.",
+            "archive_correlation_decrypt_check": "Decrypt supported XML archive entries during archive correlation.",
+            "archive_correlation_format_combo": "Report format for exported archive, file, or folder correlation results.",
+            "archive_browse_capture_button": "Choose the capture log used for correlation.",
+            "archive_browse_baseline_button": "Choose an optional baseline capture for before/after comparison.",
+            "archive_browse_cache_button": "Choose the decoded archive cache folder.",
+            "archive_browse_correlation_root_button": "Choose a decoded or unpacked folder for folder correlation.",
+            "archive_browse_selected_file_button": "Choose a single decoded or unpacked file for focused comparison.",
+            "archive_correlate_button": "Compare the capture against indexed archive entries and decoded cache files.",
+            "archive_correlate_file_button": "Compare the capture against only the selected decoded/unpacked file.",
+            "archive_correlate_root_button": "Compare the capture against a decoded/unpacked folder tree.",
+            "archive_export_correlation_button": "Export the latest archive, file, or folder correlation report.",
+            "archive_extract_match_button": "Copy the decoded cache file behind the selected archive match into a chosen folder.",
+            "archive_export_dmm_button": "Create a review-required DMM patch draft from the latest correlation result.",
+            "archive_correlation_filter_edit": "Filter visible correlation rows without rerunning correlation.",
+            "archive_index_table": "Indexed archive entries found in the current SQLite archive index.",
+            "archive_correlation_table": "Correlation matches ranked by confidence and evidence trail.",
+            "archive_report_view": "Text report from the latest archive/index/correlation operation.",
+            "match_preview_view": "Decoded bytes, printable context, evidence metadata, and patch skeleton for the selected match.",
+            "preset_name_edit": "Name to use when saving the current settings as a preset.",
+            "preset_list": "Saved local settings presets.",
+            "preset_refresh_button": "Reload the local preset list.",
+            "preset_save_button": "Save the current settings under the entered preset name.",
+            "preset_load_button": "Apply the selected preset to the current GUI settings.",
+            "preset_delete_button": "Delete the selected local preset.",
+            "preset_import_button": "Import a preset JSON file into the local preset folder.",
+            "preset_export_button": "Export the selected preset JSON file.",
+        }
+        set_widget_tips(
+            [
+                (widget, tip)
+                for name, tip in tips.items()
+                if (widget := getattr(self, name, None)) is not None
+            ]
+        )
 
     def _apply_default_settings(self) -> None:
         if hasattr(self, "settings_preview"):

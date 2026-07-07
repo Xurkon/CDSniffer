@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added GUI hover tips for settings, capture controls, search controls, archive workflows, and preset actions, plus README quick-start guidance for first-time GUI use
 - Added an offscreen PySide6 GUI smoke test that instantiates the main window and verifies the expected tab layout/status widgets
 - Added DMM conflict reports with `--dmm-check` and `--dmm-against` for exact or overlapping byte ranges against existing DMM JSON mods
 - Added opt-in JSON schema validation gates through `--validate-schemas` and `CDSNIFFER_VALIDATE_SCHEMAS=1`
