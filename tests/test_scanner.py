@@ -35,6 +35,7 @@ from cd_sniffer.paz_archive import (
     parse_pamt,
     PazEntry,
 )
+from cd_sniffer.schema_validation import schema_validation_requested, validate_payload_schema
 from cd_sniffer.core import (
     build_capture_gate_filters,
     capture_gate_matches,
@@ -727,6 +728,30 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(result["raw_match_limit"], 4)
         self.assertEqual(result["truncated_at_raw_match_count"], 4)
         self.assertEqual(result["match_count"], 1)
+
+    def test_schema_validation_accepts_archive_index_report(self):
+        payload = {
+            "schema_version": 1,
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "db_path": "logs/index.sqlite",
+            "roots": ["C:/Game"],
+            "patterns": ["*.paseq"],
+            "indexed_count": 1,
+            "compression_counts": {"uncompressed": 1},
+            "extension_counts": {".paseq": 1},
+        }
+
+        validate_payload_schema(payload, "archive-index")
+
+    def test_schema_validation_rejects_invalid_payload(self):
+        with self.assertRaisesRegex(ValueError, "schema validation failed"):
+            validate_payload_schema({"schema_version": 2}, "archive-index")
+
+    def test_schema_validation_env_gate(self):
+        with patch.dict("os.environ", {"CDSNIFFER_VALIDATE_SCHEMAS": "1"}):
+            self.assertTrue(schema_validation_requested())
+        with patch.dict("os.environ", {"CDSNIFFER_VALIDATE_SCHEMAS": "0"}):
+            self.assertFalse(schema_validation_requested())
 
     def test_export_cached_archive_match_writes_decoded_file_and_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:

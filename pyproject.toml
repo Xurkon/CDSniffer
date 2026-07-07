@@ -17,7 +17,8 @@ cdsniffer-gui = "cd_sniffer.gui:main"
 [project.optional-dependencies]
 gui = ["PySide6>=6.7"]
 unpack = ["cryptography>=42", "lz4>=4.3"]
-full = ["PySide6>=6.7", "cryptography>=42", "lz4>=4.3"]
+schema = ["jsonschema>=4.22"]
+full = ["PySide6>=6.7", "cryptography>=42", "lz4>=4.3", "jsonschema>=4.22"]
 
 [tool.setuptools]
 packages = ["cd_sniffer"]

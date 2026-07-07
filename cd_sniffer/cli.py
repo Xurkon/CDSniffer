@@ -60,6 +60,7 @@ from .paz_archive import (
     render_archive_csv,
     render_archive_markdown,
 )
+from .schema_validation import schema_validation_requested, validate_payload_schema
 from .windows import is_key_down
 
 
@@ -187,7 +188,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--archive-no-decrypt", action="store_true", help="Do not decrypt XML entries during archive extraction")
     parser.add_argument("--archive-dry-run", action="store_true", help="Show what would be extracted without writing files")
     parser.add_argument("--archive-validate", action="store_true", help="Read, decrypt, and decode matching archive entries without writing files")
+    parser.add_argument("--validate-schemas", action="store_true", help="Validate generated JSON payloads against bundled schemas before writing or printing")
     return parser.parse_args()
+
+
+def validate_result_if_requested(args: argparse.Namespace, schema_name: str, payload: dict[str, Any]) -> None:
+    if schema_validation_requested(bool(getattr(args, "validate_schemas", False))):
+        validate_payload_schema(payload, schema_name)
 
 
 def prepare_capture_payload(
@@ -218,6 +225,7 @@ def prepare_capture_payload(
 
 
 def write_and_report_payload(args: argparse.Namespace, output_path: Path, payload: dict[str, Any]) -> None:
+    validate_result_if_requested(args, "capture", payload)
     if args.format in {"csv", "markdown"}:
         write_rendered_snapshot(output_path, payload, args.format)
     else:
@@ -324,6 +332,7 @@ def main() -> int:
             print(f"Archive index failed: {exc}")
             return 1
 
+        validate_result_if_requested(args, "archive-index", result)
         if args.archive_format == "csv":
             rendered = render_archive_index_csv(result)
         elif args.archive_format == "markdown":
@@ -385,6 +394,7 @@ def main() -> int:
             print(f"Archive operation failed: {exc}")
             return 1
 
+        validate_result_if_requested(args, "archive", result)
         if args.archive_format == "csv":
             rendered = render_archive_csv(result)
         elif args.archive_format == "markdown":
@@ -441,6 +451,7 @@ def main() -> int:
             print(f"Archive correlation failed: {exc}")
             return 1
 
+        validate_result_if_requested(args, "archive-correlation", result)
         if args.correlate_format == "csv":
             rendered = render_archive_correlation_csv(result)
         elif args.correlate_format == "markdown":
@@ -519,6 +530,7 @@ def main() -> int:
             print(f"Correlation failed: {exc}")
             return 1
 
+        validate_result_if_requested(args, "correlation", result)
         if args.correlate_format == "csv":
             rendered = render_correlation_csv(result)
         elif args.correlate_format == "markdown":

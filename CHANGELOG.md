@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added opt-in JSON schema validation gates through `--validate-schemas` and `CDSNIFFER_VALIDATE_SCHEMAS=1`
 - Added GUI one-click extraction for selected archive correlation matches, exporting the decoded cache file with archive-relative paths and a provenance sidecar
 - Added `--correlate-repeat` repeat-run confidence rollups so candidates reproduced across multiple target captures get repeat hit counts, ratios, confidence reasons, and report/schema fields
 - Added richer format analyzer hints for domain paths, mission/quest-like JSON records, PASEQ timing values, nearby sequence labels, and CRC/hash candidates
