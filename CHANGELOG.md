@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added fail-fast validation for imported settings profiles so unsupported modes and invalid numeric ranges are rejected before capture starts
+- Added live capture-summary syncing so the GUI preview now updates when capture, filter, tray, or archive settings change
 - Added copyable error summaries, structured action logs for major GUI workflows, and a rollback-friendly last-good settings snapshot with restore support
 - Added archive workflow preflight checks for archive roots, index DBs, cache folders, baseline captures, and selected decoded files
 - Added file-backed GUI settings profile helpers plus round-trip smoke coverage for export/import and normalized hotkeys

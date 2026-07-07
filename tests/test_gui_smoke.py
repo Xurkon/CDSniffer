@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -16,6 +17,7 @@ try:
     from PySide6.QtGui import QKeyEvent
     from PySide6.QtWidgets import QApplication
 
+    from cd_sniffer.cli import parse_args
     from cd_sniffer.gui import HotkeyLineEdit, MainWindow, SettingsDialog, require_path
 except Exception as exc:  # pragma: no cover - depends on optional GUI extra
     QApplication = None  # type: ignore[assignment]
@@ -23,6 +25,7 @@ except Exception as exc:  # pragma: no cover - depends on optional GUI extra
     SettingsDialog = None  # type: ignore[assignment]
     HotkeyLineEdit = None  # type: ignore[assignment]
     require_path = None  # type: ignore[assignment]
+    parse_args = None  # type: ignore[assignment]
     GUI_IMPORT_ERROR = exc
 else:
     GUI_IMPORT_ERROR = None
@@ -91,6 +94,28 @@ class GuiSmokeTests(unittest.TestCase):
             window.close()
             app.processEvents()
 
+    def test_imported_settings_profiles_validate_basic_ranges(self):
+        app = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            profile_path = Path(tmp_dir) / "bad-profile.json"
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "mode": "unsupported",
+                        "hotkey": "F8",
+                        "interval": -1,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            window = MainWindow()
+            try:
+                with self.assertRaises(ValueError):
+                    window.load_settings_profile_from_path(profile_path)
+            finally:
+                window.close()
+                app.processEvents()
+
     def test_settings_profile_export_and_import_roundtrip(self):
         app = QApplication.instance() or QApplication([])
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -134,6 +159,57 @@ class GuiSmokeTests(unittest.TestCase):
                 source.close()
                 target.close()
                 app.processEvents()
+
+    def test_cli_and_gui_default_settings_match_for_shared_fields(self):
+        app = QApplication.instance() or QApplication([])
+        window = MainWindow()
+        try:
+            with patch.object(sys, "argv", ["cdsniffer"]):
+                cli_defaults = parse_args()
+            gui_defaults = window.collect_settings_dict()
+            shared_fields = [
+                "process",
+                "mode",
+                "hotkey",
+                "interval",
+                "output",
+                "timestamp_output",
+                "session_name",
+                "format",
+                "label",
+                "game_version",
+                "capture_gate",
+                "capture_gate_match",
+                "unique_only",
+                "max_region_size",
+                "context_bytes",
+                "context_number_radius",
+                "gate_max_regions",
+                "gate_max_hits_per_region",
+                "summary",
+                "summary_limit",
+                "compare_last",
+                "compare_limit",
+                "export_manifest",
+                "quiet",
+                "verbose",
+            ]
+            for field in shared_fields:
+                self.assertEqual(gui_defaults[field], getattr(cli_defaults, field if field != "process" else "process"))
+        finally:
+            window.close()
+            app.processEvents()
+
+    def test_capture_summary_updates_when_hotkey_changes(self):
+        app = QApplication.instance() or QApplication([])
+        window = MainWindow()
+        try:
+            window.hotkey_edit.setText("G")
+            app.processEvents()
+            self.assertIn("Hotkey: G", window.settings_preview.toPlainText())
+        finally:
+            window.close()
+            app.processEvents()
 
     def test_require_path_validates_missing_and_existing_inputs(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -317,6 +317,33 @@ def normalize_hotkey_name(value: Any) -> str:
     return hotkey
 
 
+def validate_settings_dict(settings: dict[str, Any]) -> None:
+    mode = str(settings.get("mode", "loop"))
+    if mode not in {"once", "loop", "hotkey"}:
+        raise ValueError(f"Unsupported capture mode: {mode}")
+
+    def require_minimum(field: str, minimum: float, *, allow_zero: bool = True) -> None:
+        if field not in settings or settings[field] is None:
+            return
+        value = settings[field]
+        if isinstance(value, bool):
+            raise ValueError(f"{field} must be numeric")
+        if float(value) < minimum or (not allow_zero and float(value) == minimum):
+            comparator = "greater than" if not allow_zero else "at least"
+            raise ValueError(f"{field} must be {comparator} {minimum}")
+
+    require_minimum("interval", 0.0, allow_zero=False)
+    require_minimum("captures", 0.0)
+    require_minimum("summary_limit", 1.0, allow_zero=False)
+    require_minimum("compare_limit", 1.0, allow_zero=False)
+    require_minimum("max_region_size", 1.0, allow_zero=False)
+    require_minimum("context_bytes", 0.0)
+    require_minimum("context_number_radius", 0.0)
+    require_minimum("gate_max_regions", 0.0)
+    require_minimum("gate_max_hits_per_region", 0.0)
+    normalize_hotkey_name(settings.get("hotkey", "F8"))
+
+
 def format_action_log(action: str, **fields: Any) -> str:
     payload = {"action": action, **fields}
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
@@ -1245,6 +1272,7 @@ class MainWindow(QMainWindow):
         self.window_filter_edit.setPlaceholderText("Regex filter for windows")
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["once", "loop", "hotkey"])
+        self.mode_combo.setCurrentText("loop")
         self.hotkey_edit = HotkeyLineEdit("F8")
         self.interval_spin = QDoubleSpinBox()
         self.interval_spin.setRange(0.05, 3600.0)
@@ -1257,7 +1285,7 @@ class MainWindow(QMainWindow):
         self.output_browse = QPushButton("Browse")
         self.output_browse.clicked.connect(self.browse_output)
         self.timestamp_check = QCheckBox("Timestamp output")
-        self.timestamp_check.setChecked(True)
+        self.timestamp_check.setChecked(False)
         self.session_name_edit = QLineEdit("cdsniffer")
         self.format_combo = QComboBox()
         self.format_combo.addItems(["jsonl", "json", "csv", "markdown"])
@@ -1277,12 +1305,12 @@ class MainWindow(QMainWindow):
         self.summary_limit_spin.setRange(1, 1000)
         self.summary_limit_spin.setValue(10)
         self.compare_check = QCheckBox("Compare last")
-        self.compare_check.setChecked(True)
+        self.compare_check.setChecked(False)
         self.compare_limit_spin = QSpinBox()
         self.compare_limit_spin.setRange(1, 1000)
         self.compare_limit_spin.setValue(20)
         self.export_manifest_check = QCheckBox("Export manifest")
-        self.export_manifest_check.setChecked(True)
+        self.export_manifest_check.setChecked(False)
         self.quiet_check = QCheckBox("Quiet")
         self.verbose_check = QCheckBox("Verbose")
         self.tray_enabled_check = QCheckBox("Enable tray icon")
@@ -1358,8 +1386,69 @@ class MainWindow(QMainWindow):
         self.exclude_regex_edit.setPlaceholderText("One regex per line")
         self.notes_edit = QPlainTextEdit()
         self.notes_edit.setPlaceholderText("Optional session notes")
-        self.hotkey_edit.textChanged.connect(self.refresh_capture_summary)
+        self.connect_capture_summary_signals()
         self._apply_default_settings()
+
+    def connect_capture_summary_signals(self) -> None:
+        widgets: list[tuple[Any, str]] = [
+            (self.pid_edit, "textChanged"),
+            (self.process_edit, "textChanged"),
+            (self.window_title_edit, "textChanged"),
+            (self.window_filter_edit, "textChanged"),
+            (self.mode_combo, "currentTextChanged"),
+            (self.hotkey_edit, "textChanged"),
+            (self.interval_spin, "valueChanged"),
+            (self.captures_spin, "valueChanged"),
+            (self.output_edit, "textChanged"),
+            (self.timestamp_check, "toggled"),
+            (self.session_name_edit, "textChanged"),
+            (self.format_combo, "currentTextChanged"),
+            (self.label_edit, "textChanged"),
+            (self.game_version_edit, "textChanged"),
+            (self.capture_gate_combo, "currentTextChanged"),
+            (self.capture_gate_match_combo, "currentTextChanged"),
+            (self.unique_only_check, "toggled"),
+            (self.context_bytes_spin, "valueChanged"),
+            (self.decode_context_numbers_check, "toggled"),
+            (self.context_number_radius_spin, "valueChanged"),
+            (self.max_region_size, "valueChanged"),
+            (self.max_regions, "valueChanged"),
+            (self.max_hits_per_region, "valueChanged"),
+            (self.include_keywords_edit, "textChanged"),
+            (self.exclude_keywords_edit, "textChanged"),
+            (self.include_regex_edit, "textChanged"),
+            (self.exclude_regex_edit, "textChanged"),
+            (self.signature_pack_edit, "textChanged"),
+            (self.watch_edit, "textChanged"),
+            (self.gate_keywords_edit, "textChanged"),
+            (self.gate_regex_edit, "textChanged"),
+            (self.gate_max_regions_spin, "valueChanged"),
+            (self.gate_max_hits_per_region_spin, "valueChanged"),
+            (self.summary_combo, "currentTextChanged"),
+            (self.summary_limit_spin, "valueChanged"),
+            (self.compare_check, "toggled"),
+            (self.compare_limit_spin, "valueChanged"),
+            (self.export_manifest_check, "toggled"),
+            (self.quiet_check, "toggled"),
+            (self.verbose_check, "toggled"),
+            (self.notes_edit, "textChanged"),
+            (self.tray_enabled_check, "toggled"),
+            (self.tray_start_hidden_check, "toggled"),
+            (self.tray_minimize_to_tray_check, "toggled"),
+            (self.tray_notifications_check, "toggled"),
+            (self.tray_click_behavior_combo, "currentTextChanged"),
+            (self.tray_notify_game_detected_check, "toggled"),
+            (self.tray_notify_game_lost_check, "toggled"),
+            (self.tray_notify_capture_started_check, "toggled"),
+            (self.tray_notify_capture_stopped_check, "toggled"),
+            (self.tray_notify_relinked_check, "toggled"),
+            (self.tray_notify_errors_check, "toggled"),
+            (self.tray_notify_capture_complete_check, "toggled"),
+        ]
+        for widget, signal_name in widgets:
+            signal = getattr(widget, signal_name, None)
+            if signal is not None:
+                signal.connect(self.refresh_capture_summary)
 
     def apply_main_tooltips(self) -> None:
         tips = {
@@ -3299,6 +3388,7 @@ class MainWindow(QMainWindow):
         settings = json.loads(source.read_text(encoding="utf-8"))
         if not isinstance(settings, dict):
             raise ValueError("Profile JSON must be an object.")
+        validate_settings_dict(settings)
         self.apply_settings_dict(settings)
         self.log_action("settings.import", path=str(source))
 
@@ -3363,6 +3453,7 @@ class MainWindow(QMainWindow):
         }
 
     def apply_settings_dict(self, settings: dict[str, Any]) -> None:
+        validate_settings_dict(settings)
         hotkey = normalize_hotkey_name(settings.get("hotkey", "F8"))
         if settings.get("pid") is not None:
             self.pid_edit.setText(str(settings["pid"]))
