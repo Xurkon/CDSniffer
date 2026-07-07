@@ -3188,9 +3188,7 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            profile = self.collect_settings_dict()
-            Path(path).write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
-            self.append_log(f"Exported settings profile to {path}.")
+            self.save_settings_profile_to_path(path)
         except Exception as exc:
             QMessageBox.warning(self, "Export Failed", str(exc))
 
@@ -3199,13 +3197,23 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            settings = json.loads(Path(path).read_text(encoding="utf-8"))
-            if not isinstance(settings, dict):
-                raise ValueError("Profile JSON must be an object.")
-            self.apply_settings_dict(settings)
-            self.append_log(f"Imported settings profile from {path}.")
+            self.load_settings_profile_from_path(path)
         except Exception as exc:
             QMessageBox.warning(self, "Import Failed", str(exc))
+
+    def save_settings_profile_to_path(self, path: str | Path) -> None:
+        profile = self.collect_settings_dict()
+        target = Path(path)
+        target.write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.append_log(f"Exported settings profile to {target}.")
+
+    def load_settings_profile_from_path(self, path: str | Path) -> None:
+        source = Path(path)
+        settings = json.loads(source.read_text(encoding="utf-8"))
+        if not isinstance(settings, dict):
+            raise ValueError("Profile JSON must be an object.")
+        self.apply_settings_dict(settings)
+        self.append_log(f"Imported settings profile from {source}.")
 
     def collect_settings_dict(self) -> dict[str, Any]:
         pid_text = self.pid_edit.text().strip()

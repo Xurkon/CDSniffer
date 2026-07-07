@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
+from pathlib import Path
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -85,6 +87,50 @@ class GuiSmokeTests(unittest.TestCase):
         finally:
             window.close()
             app.processEvents()
+
+    def test_settings_profile_export_and_import_roundtrip(self):
+        app = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            export_path = Path(tmp_dir) / "profile.json"
+            source = MainWindow()
+            target = MainWindow()
+            try:
+                source.process_edit.setText("Crimson Desert")
+                source.hotkey_edit.setText("g")
+                source.mode_combo.setCurrentText("hotkey")
+                source.unique_only_check.setChecked(True)
+                source.tray_enabled_check.setChecked(False)
+                source.output_edit.setText(str(Path(tmp_dir) / "captures" / "run.jsonl"))
+
+                source.save_settings_profile_to_path(export_path)
+                self.assertTrue(export_path.exists())
+
+                exported = export_path.read_text(encoding="utf-8")
+                self.assertIn('"hotkey": "G"', exported)
+                self.assertIn('"mode": "hotkey"', exported)
+
+                target.apply_settings_dict(
+                    {
+                        "process": "Other",
+                        "hotkey": "F8",
+                        "mode": "loop",
+                        "unique_only": False,
+                        "tray_enabled": True,
+                        "output": "logs/other.jsonl",
+                    }
+                )
+                target.load_settings_profile_from_path(export_path)
+
+                self.assertEqual(target.process_edit.text(), "Crimson Desert")
+                self.assertEqual(target.hotkey_edit.text(), "G")
+                self.assertEqual(target.mode_combo.currentText(), "hotkey")
+                self.assertTrue(target.unique_only_check.isChecked())
+                self.assertFalse(target.tray_enabled_check.isChecked())
+                self.assertEqual(target.output_edit.text(), str(Path(tmp_dir) / "captures" / "run.jsonl"))
+            finally:
+                source.close()
+                target.close()
+                app.processEvents()
 
 
 if __name__ == "__main__":

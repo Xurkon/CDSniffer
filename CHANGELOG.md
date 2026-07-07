@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added file-backed GUI settings profile helpers plus round-trip smoke coverage for export/import and normalized hotkeys
 - Hardened GUI hotkey handling with normalized validation, atomic import/apply behavior, and settings preview consistency
 - Added keyboard hotkey capture widgets so the GUI hotkey field can be set by pressing a key instead of typing it manually
 - Added GUI hover tips for settings, capture controls, search controls, archive workflows, and preset actions, plus README quick-start guidance for first-time GUI use
