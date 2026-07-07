@@ -172,69 +172,82 @@ def apply_modern_theme(app: QApplication) -> None:
     app.setStyleSheet(
         """
         QMainWindow, QWidget {
-            background: #11161f;
+            background: #101620;
             color: #eef2ff;
         }
         QTabWidget::pane {
-            border: 1px solid #25324a;
-            border-radius: 10px;
-            background: #0e1421;
+            border: 0;
+            background: #101620;
             top: -1px;
         }
         QTabBar::tab {
-            background: #182233;
+            background: #172235;
             color: #cfd8ef;
-            padding: 10px 16px;
+            padding: 11px 18px;
             margin-right: 4px;
-            border-top-left-radius: 8px;
-            border-top-right-radius: 8px;
+            border-radius: 8px;
+        }
+        QTabBar::tab:hover {
+            background: #1d2a41;
         }
         QTabBar::tab:selected {
-            background: #22304a;
+            background: #25405f;
             color: #ffffff;
         }
         QGroupBox {
-            border: 1px solid #25324a;
-            border-radius: 10px;
-            margin-top: 12px;
-            padding-top: 10px;
-            background: rgba(10, 14, 26, 0.65);
+            border: 0;
+            border-radius: 8px;
+            margin-top: 16px;
+            padding-top: 16px;
+            background: #141c2a;
         }
         QGroupBox::title {
             subcontrol-origin: margin;
-            left: 12px;
-            padding: 0 6px;
-            color: #9ecbff;
+            left: 10px;
+            padding: 0 4px;
+            color: #9fc7ff;
+            font-weight: 600;
         }
         QLabel {
             color: #eef2ff;
         }
         QLineEdit, QPlainTextEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {
-            background: #0b1020;
-            border: 1px solid #2a3750;
+            background: #0c1220;
+            border: 1px solid #26344d;
             border-radius: 8px;
             padding: 8px;
             selection-background-color: #58a6ff;
         }
+        QPlainTextEdit#settingsPreview {
+            border: 0;
+            border-radius: 8px;
+            background: #0c1220;
+        }
+        QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+            border: 1px solid #4f7db8;
+        }
+        QPlainTextEdit#settingsPreview:focus {
+            border: 0;
+        }
         QPushButton {
-            background: #22304a;
-            border: 1px solid #3b4e73;
+            background: #203451;
+            border: 1px solid #345177;
             border-radius: 8px;
             padding: 8px 14px;
         }
         QPushButton:hover {
-            background: #2f4060;
+            background: #2a4568;
         }
         QPushButton:disabled {
             background: #172133;
             color: #6c7b98;
         }
         QTableWidget {
-            background: #0b1020;
-            alternate-background-color: #111a2d;
-            gridline-color: #26334d;
-            border: 1px solid #25324a;
-            border-radius: 10px;
+            background: #0c1220;
+            alternate-background-color: #111927;
+            gridline-color: #1d2a3f;
+            border: 0;
+            border-radius: 8px;
         }
         QHeaderView::section {
             background: #182233;
@@ -977,23 +990,29 @@ class MainWindow(QMainWindow):
 
     def build_capture_tab(self) -> None:
         layout = QVBoxLayout(self.capture_tab)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
         self._init_hidden_settings()
 
         hero = QGroupBox("Session")
         hero_layout = QVBoxLayout(hero)
+        hero_layout.setContentsMargins(14, 12, 14, 12)
+        hero_layout.setSpacing(8)
         self.session_summary = QLabel("")
         self.session_summary.setWordWrap(True)
+        self.session_summary.setVisible(False)
         self.window_status = QLabel("No window selected yet.")
         self.window_status.setWordWrap(True)
-        self.target_status = QLabel("Game detected: not checked yet.")
+        self.target_status = QLabel("Game not detected")
         self.target_status.setWordWrap(True)
-        self.target_status.setStyleSheet("color: #f0c674; font-weight: 600;")
+        self.target_status.setStyleSheet("color: #ff7a90; font-weight: 700;")
         hero_layout.addWidget(self.session_summary)
         hero_layout.addWidget(self.window_status)
         hero_layout.addWidget(self.target_status)
         layout.addWidget(hero)
 
         controls = QHBoxLayout()
+        controls.setSpacing(8)
         self.start_button = QPushButton("Start Capture")
         self.start_button.clicked.connect(self.start_capture)
         self.stop_button = QPushButton("Stop")
@@ -1021,7 +1040,9 @@ class MainWindow(QMainWindow):
 
         summary_box = QGroupBox("Current Settings")
         summary_layout = QVBoxLayout(summary_box)
+        summary_layout.setContentsMargins(12, 12, 12, 12)
         self.settings_preview = QPlainTextEdit()
+        self.settings_preview.setObjectName("settingsPreview")
         self.settings_preview.setReadOnly(True)
         self.settings_preview.setFont(QFont("Cascadia Mono", 10))
         summary_layout.addWidget(self.settings_preview)
@@ -1167,13 +1188,13 @@ class MainWindow(QMainWindow):
             pid = None
         detected = pid is not None or self.worker is not None
         if self.worker is not None:
-            self.target_status.setText(f"Game detected: attached to PID {pid or 'unknown'}")
+            self.target_status.setText(f"Game Detected - attached to PID {pid or 'unknown'}")
             self.target_status.setStyleSheet("color: #67e8a5; font-weight: 700;")
         elif pid is not None:
-            self.target_status.setText(f"Game detected: PID {pid}")
+            self.target_status.setText(f"Game Detected - PID {pid}")
             self.target_status.setStyleSheet("color: #67e8a5; font-weight: 700;")
         else:
-            self.target_status.setText("Game detected: not found")
+            self.target_status.setText("Game not detected")
             self.target_status.setStyleSheet("color: #ff7a90; font-weight: 700;")
         if self._last_target_detected is not None and detected != self._last_target_detected:
             if detected:
