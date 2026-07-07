@@ -69,6 +69,23 @@ class GuiSmokeTests(unittest.TestCase):
             window.close()
             app.processEvents()
 
+    def test_hotkey_capture_state_label_updates_in_settings_dialog(self):
+        app = QApplication.instance() or QApplication([])
+        window = MainWindow()
+        dialog = SettingsDialog(window, window.collect_settings_dict())
+        try:
+            QTest.mouseClick(dialog.hotkey, Qt.LeftButton)
+            app.processEvents()
+            self.assertIn("Press a key", dialog.hotkey_state_label.text())
+            QTest.keyClick(dialog.hotkey, Qt.Key_G)
+            app.processEvents()
+            self.assertIn("Hotkey recorded: G", dialog.hotkey_state_label.text())
+            self.assertEqual(dialog.hotkey.text(), "G")
+        finally:
+            dialog.close()
+            window.close()
+            app.processEvents()
+
     def test_hotkey_line_edit_captures_and_clears_keys(self):
         app = QApplication.instance() or QApplication([])
         widget = HotkeyLineEdit("F8")

@@ -364,16 +364,24 @@ def require_path(value: str, label: str, *, kind: str = "path") -> Path:
 
 
 class HotkeyLineEdit(QLineEdit):
+    capture_prompt = "Click the field and press a key."
+
+    hotkey_state_changed = Signal(str)
+
     def __init__(self, text: str = "") -> None:
         super().__init__(text)
         self.setReadOnly(True)
         self.setClearButtonEnabled(True)
         self.setFocusPolicy(Qt.StrongFocus)
-        self.setPlaceholderText("Click and press a key")
+        self.setPlaceholderText(self.capture_prompt)
+
+    def _set_capture_state(self, message: str) -> None:
+        self.hotkey_state_changed.emit(message)
 
     def _begin_capture(self) -> None:
         self.setFocus(Qt.MouseFocusReason)
         self.selectAll()
+        self._set_capture_state("Press a key to record the hotkey.")
 
     def mousePressEvent(self, event) -> None:  # noqa: ANN001 - Qt event type varies by binding
         self._begin_capture()
@@ -382,6 +390,11 @@ class HotkeyLineEdit(QLineEdit):
     def focusInEvent(self, event) -> None:  # noqa: ANN001 - Qt event type varies by binding
         super().focusInEvent(event)
         self.selectAll()
+        self._set_capture_state("Press a key to record the hotkey.")
+
+    def focusOutEvent(self, event) -> None:  # noqa: ANN001 - Qt event type varies by binding
+        super().focusOutEvent(event)
+        self._set_capture_state(self.capture_prompt)
 
     def keyPressEvent(self, event) -> None:  # noqa: ANN001 - Qt event type varies by binding
         key = int(event.key())
@@ -390,6 +403,7 @@ class HotkeyLineEdit(QLineEdit):
             return
         if key in {Qt.Key_Backspace, Qt.Key_Delete, Qt.Key_Escape}:
             self.clear()
+            self._set_capture_state("Hotkey cleared. Click the field and press a key.")
             event.accept()
             return
 
@@ -397,6 +411,7 @@ class HotkeyLineEdit(QLineEdit):
         if hotkey_name:
             self.setText(hotkey_name)
             self.selectAll()
+            self._set_capture_state(f"Hotkey recorded: {hotkey_name}. Click the field to change it.")
             event.accept()
             return
 
@@ -472,6 +487,10 @@ class SettingsDialog(QDialog):
         self.mode.addItems(["once", "loop", "hotkey"])
         self.mode.setCurrentText(str(self._settings.get("mode", "loop")))
         self.hotkey = HotkeyLineEdit(str(self._settings.get("hotkey", "F8")))
+        self.hotkey_state_label = QLabel(HotkeyLineEdit.capture_prompt)
+        self.hotkey_state_label.setWordWrap(True)
+        self.hotkey_state_label.setStyleSheet("color: #93a4c3; font-size: 11px;")
+        self.hotkey.hotkey_state_changed.connect(self.hotkey_state_label.setText)
         self.interval = QDoubleSpinBox()
         self.interval.setRange(0.05, 3600.0)
         self.interval.setDecimals(2)
@@ -500,6 +519,7 @@ class SettingsDialog(QDialog):
         self.unique_only.setChecked(bool(self._settings.get("unique_only", False)))
         form.addRow("Mode", self.mode)
         form.addRow("Hotkey", self.hotkey)
+        form.addRow("", self.hotkey_state_label)
         form.addRow("Interval", self.interval)
         form.addRow("Captures", self.captures)
         form.addRow("Output", self.output)
