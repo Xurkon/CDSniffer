@@ -274,6 +274,13 @@ How unpacking, decoding, and comparison fit together:
 - `--correlate-root` scans a whole unpacked/decoded folder tree.
 - `--correlate-file` scans only the selected decoded/unpacked file, which is best when the archive report or manual review already gave you one likely target.
 
+Choosing the right comparison mode:
+
+- Use `--correlate-archive` first when you have a capture and want CDSniffer to search likely archive entries without unpacking whole folders manually.
+- Use `--correlate-file` when you already have one decoded cache file, extracted file, or manually identified candidate and need the exact file offset quickly.
+- Use `--correlate-root` when you do not know which decoded file contains the value yet and need a broader search across a folder tree.
+- Use `--correlate-baseline` plus `--correlate-target` when you captured a before/after state and want target-only candidates ranked higher.
+
 Useful correlation options:
 
 - `--correlate-capture` points to a CDSniffer JSON or JSONL capture
@@ -443,6 +450,7 @@ Good next steps before opening this up more broadly:
 - The JSON schema for archive index output lives in `schemas/cdsniffer-archive-index.schema.json`.
 - The JSON schema for archive correlation output lives in `schemas/cdsniffer-archive-correlation.schema.json`.
 - The detailed project history lives in `CHANGELOG.md`.
+- The reviewed project audit and maintainer follow-up live in `AUDIT_REPORT.md`.
 - The GUI is optional and needs `pip install .[gui]`.
 - Encrypted XML and LZ4 archive decoding need `pip install .[unpack]`; PAMT listing, raw pass-through, and zlib extraction use the standard library.
 - The main GUI capture tab is intentionally a dashboard; all editable settings live in the settings dialog.

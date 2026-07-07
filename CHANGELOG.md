@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added the reviewed project audit report with maintainer follow-up notes and clarified README guidance for choosing archive, folder, or selected-file correlation
 - Added `--correlate-file`, GUI decoded-file selection, and an embedded-terminal `correlate-file` command for focused comparison against one selected unpacked/cache file
 - Added archive-correlation truncation metadata so reports indicate when raw or grouped matches were capped
 - Refined the GUI theme with flatter panels, fewer decorative borders, and clearer game detection status text
