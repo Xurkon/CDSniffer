@@ -160,6 +160,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--archive-format", choices=["json", "csv", "markdown"], default="json", help="Format used for archive reports")
     parser.add_argument("--archive-no-decrypt", action="store_true", help="Do not decrypt XML entries during archive extraction")
     parser.add_argument("--archive-dry-run", action="store_true", help="Show what would be extracted without writing files")
+    parser.add_argument("--archive-validate", action="store_true", help="Read, decrypt, and decode matching archive entries without writing files")
     return parser.parse_args()
 
 
@@ -261,7 +262,7 @@ def main() -> int:
             return 1
         try:
             if args.archive_extract:
-                if not args.archive_output:
+                if not args.archive_output and not (args.archive_dry_run or args.archive_validate):
                     print("--archive-output is required with --archive-extract")
                     return 1
                 if not args.archive_filters and args.archive_limit is None and not args.archive_all:
@@ -271,9 +272,10 @@ def main() -> int:
                 entries = filter_archive_entries(entries, patterns=args.archive_filters, limit=args.archive_limit)
                 result = extract_entries(
                     entries,
-                    Path(args.archive_output),
+                    Path(args.archive_output or "."),
                     decrypt_xml=not args.archive_no_decrypt,
-                    dry_run=args.archive_dry_run,
+                    dry_run=args.archive_dry_run or args.archive_validate,
+                    validate_only=args.archive_validate,
                 )
                 result["roots"] = [str(root) for root in archive_roots]
                 result["patterns"] = args.archive_filters or ["*"]

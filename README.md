@@ -31,7 +31,7 @@ For compiled releases, the clean target is two executables:
 - Groups duplicate evidence at the same file offset so one candidate carries its full evidence trail
 - Can compare baseline and target captures to highlight target-only file-offset candidates
 - Adds format-aware correlation hints for JSON/JSONL records, text line locations, PASEQ candidates, nearby strings, and little-endian integers
-- Can parse PAMT indexes and extract/decode PAZ archive entries without launching an external unpacker
+- Can parse PAMT indexes and extract/validate/decode PAZ archive entries without launching an external unpacker
 - Can gate captures until camp mission UI sentinel strings are present in memory
 - Can write only new unique hit text values during a capture session
 - Searches captured payloads from the CLI and the GUI
@@ -187,7 +187,13 @@ python -m cd_sniffer --archive-list --archive-root "C:\Program Files (x86)\Steam
 Extract and decode matching PAZ entries:
 
 ```powershell
-python -m cd_sniffer --archive-extract --archive-root "C:\Program Files (x86)\Steam\steamapps\common\Crimson Desert" --archive-filter "*.xml" --archive-filter "*mission*" --archive-output D:\Documents\CrimsonDesertMods\decoded --archive-format json --archive-report-output logs\archive-extract.json
+python -m cd_sniffer --archive-extract --archive-root "C:\Program Files (x86)\Steam\steamapps\common\Crimson Desert" --archive-filter "*mission*.xml" --archive-output D:\Documents\CrimsonDesertMods\decoded --archive-format json --archive-report-output logs\archive-extract.json
+```
+
+Validate decode coverage without writing extracted files:
+
+```powershell
+python -m cd_sniffer --archive-extract --archive-validate --archive-root "C:\Program Files (x86)\Steam\steamapps\common\Crimson Desert" --archive-filter "*.paseq" --archive-limit 500 --archive-format json --archive-report-output logs\archive-validate-paseq.json
 ```
 
 Useful archive options:
@@ -201,8 +207,17 @@ Useful archive options:
 - `--archive-all` is required when extracting everything without a filter or limit
 - `--archive-no-decrypt` extracts encrypted XML bytes without decrypting
 - `--archive-dry-run` previews extraction without writing decoded files
+- `--archive-validate` reads, decrypts, and decodes entries without writing decoded files
 - `--archive-format json|csv|markdown` controls report format
 - `--archive-report-output` writes the archive report to a file
+
+Archive decode notes:
+
+- Compression type `0` is uncompressed pass-through.
+- Compression type `1` is treated as raw asset storage. Current 1.13 game files use this for `.dds`, `.pam`, `.pamlod`, and `.pac` assets; many of those entries intentionally have a stored size smaller than the logical asset size while already beginning with valid asset headers like `DDS ` or `PAR `.
+- Compression type `2` is LZ4 block data and needs `pip install .[unpack]`.
+- Compression type `3` uses adaptive decoding: CDSniffer tries raw, zlib, and LZ4 paths and records the decoder that worked. The current tested 1.13 install did not contain type `3` entries, so genuinely proprietary future samples will be reported instead of guessed.
+- Compression type `4` is zlib and uses the Python standard library.
 
 Correlate a capture against unpacked files:
 
@@ -283,12 +298,13 @@ The most reliable way to get the exact data you want is:
 7. Keep the capture window small with `--captures 1` or a short hotkey session so the log only contains the relevant state.
 8. Use `--include-regex` to focus on families you already know, and `--exclude-regex` to filter noisy quest or story strings.
 9. Use `--archive-list` to find likely mission/table entries inside the game PAZ/PAMT archives.
-10. Use `--archive-extract` to decode only the focused subset you need into a clean working folder.
-11. Compare the resulting strings against decoded `questgaugeinfo`, `questinfo`, and `missioninfo` style tables and keep only the entries that consistently show up in the correct camp UI.
-12. Run `--correlate-baseline` plus `--correlate-target` against the decoded file tree and inspect `target-only` rows first.
-13. Prefer rows with format hints that point to JSON record keys, mission-like tables, PASEQ candidates, or nearby little-endian values.
-14. Prefer module-relative `module_rva` over absolute `address` whenever it is available; absolute addresses can shift between launches.
-15. If a string appears in multiple game systems, prefer the one that is unique to the camp/dispatch screen over one that also appears in player quests.
+10. Use `--archive-extract --archive-validate` first to prove the focused subset can be read/decrypted/decoded without writing files.
+11. Use `--archive-extract` to decode only the focused subset you need into a clean working folder.
+12. Compare the resulting strings against decoded `questgaugeinfo`, `questinfo`, and `missioninfo` style tables and keep only the entries that consistently show up in the correct camp UI.
+13. Run `--correlate-baseline` plus `--correlate-target` against the decoded file tree and inspect `target-only` rows first.
+14. Prefer rows with format hints that point to JSON record keys, mission-like tables, PASEQ candidates, or nearby little-endian values.
+15. Prefer module-relative `module_rva` over absolute `address` whenever it is available; absolute addresses can shift between launches.
+16. If a string appears in multiple game systems, prefer the one that is unique to the camp/dispatch screen over one that also appears in player quests.
 
 In practice, that means the best workflow is to:
 
@@ -333,7 +349,7 @@ Good next steps before opening this up more broadly:
 - Add exact GUI smoke tests with the `PySide6` extra installed
 - Add DMM-specific patch emitters on top of the generic correlation patch skeletons
 - Expand format analyzers with deeper PASEQ, quest/mission table, hash, and typed record parsers
-- Expand built-in PAZ support for custom compression type `3` once the format is confirmed
+- Add sample-driven decoders for any future proprietary PAZ compression payloads that are not raw, zlib, or LZ4
 - Add repeat-run confidence rollups across multiple target captures
 - Add a build/release script for `cdsniffer.exe` and `cdsniffer-gui.exe`
 - Add a random session token to the localhost GUI IPC channel
@@ -352,6 +368,6 @@ Good next steps before opening this up more broadly:
 - The JSON schema for archive list/extract output lives in `schemas/cdsniffer-archive.schema.json`.
 - The detailed project history lives in `CHANGELOG.md`.
 - The GUI is optional and needs `pip install .[gui]`.
-- Encrypted XML and LZ4 archive decoding need `pip install .[unpack]`; PAMT listing and uncompressed/zlib extraction use the standard library.
+- Encrypted XML and LZ4 archive decoding need `pip install .[unpack]`; PAMT listing, raw pass-through, and zlib extraction use the standard library.
 - The main GUI capture tab is intentionally a dashboard; all editable settings live in the settings dialog.
 - Live search only filters the current snapshot view; it does not mutate the underlying capture payload.

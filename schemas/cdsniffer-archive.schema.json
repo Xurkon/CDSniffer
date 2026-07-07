@@ -67,7 +67,14 @@
       "type": "integer",
       "minimum": 0
     },
+    "validated_count": {
+      "type": "integer",
+      "minimum": 0
+    },
     "dry_run": {
+      "type": "boolean"
+    },
+    "validation_only": {
       "type": "boolean"
     },
     "entries": {
@@ -143,6 +150,12 @@
         "compressed": {
           "type": "boolean"
         },
+        "stored_size_differs": {
+          "type": "boolean"
+        },
+        "needs_decompression": {
+          "type": "boolean"
+        },
         "compression_type": {
           "type": "integer",
           "minimum": 0
@@ -176,10 +189,19 @@
         "decompressed": {
           "type": "boolean"
         },
+        "compression_decoder": {
+          "type": "string"
+        },
+        "written": {
+          "type": "boolean"
+        },
         "file_format": {
           "type": "string"
         },
         "dry_run": {
+          "type": "boolean"
+        },
+        "validated": {
           "type": "boolean"
         }
       },

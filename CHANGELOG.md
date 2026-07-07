@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added archive decode validation with `--archive-validate` so PAZ entries can be read, decrypted, and decoded without writing extracted files
+- Added compression type `1` raw-asset pass-through and adaptive compression type `3` handling that probes raw, zlib, and LZ4 payloads while reporting unsupported proprietary samples cleanly
 - Added built-in PAMT/PAZ archive listing and extraction commands so CDSniffer can unpack/decode game files without external unpacker executables
 - Added deterministic XML decryption, zlib decompression, optional LZ4 decompression, archive filtering, dry-run extraction, and archive JSON/CSV/Markdown reports
 - Added `schemas/cdsniffer-archive.schema.json` plus synthetic PAMT/PAZ tests for archive parsing and extraction

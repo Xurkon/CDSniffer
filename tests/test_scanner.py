@@ -19,6 +19,7 @@ from cd_sniffer.correlator import (
 )
 from cd_sniffer.paz_archive import (
     build_archive_report,
+    decode_compression,
     extract_entry,
     extract_entries,
     filter_archive_entries,
@@ -503,6 +504,64 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(result["extracted_count"], 1)
             self.assertEqual(result["decompressed_count"], 1)
             self.assertEqual((output / "testpkg" / "data" / "mission.bin").read_bytes(), raw)
+
+    def test_paz_type1_raw_asset_passes_through_without_decompression(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            raw = b"DDS " + b"\x00" * 124 + b"texture payload"
+            pamt = write_synthetic_pamt(root, "textures/test.dds", comp_size=len(raw), orig_size=len(raw) + 512, flags=0x00010000)
+            (root / "0.paz").write_bytes(raw)
+            output = root / "out"
+
+            entry = parse_pamt(pamt)[0]
+            result = extract_entry(entry, output, decrypt_xml=False)
+
+            self.assertFalse(entry.compressed)
+            self.assertTrue(entry.stored_size_differs)
+            self.assertFalse(result["decompressed"])
+            self.assertEqual(result["compression_decoder"], "passthrough")
+            self.assertEqual((output / "testpkg" / "textures" / "test.dds").read_bytes(), raw)
+
+    def test_paz_type3_adaptive_decodes_zlib_payload(self):
+        raw = b"AdaptivePayload" * 32
+        compressed = zlib.compress(raw)
+
+        decoded, decoder = decode_compression(compressed, 3, len(raw))
+
+        self.assertEqual(decoded, raw)
+        self.assertEqual(decoder, "adaptive-zlib")
+
+    def test_paz_type3_adaptive_decodes_lz4_payload_when_available(self):
+        try:
+            import lz4.block
+        except ImportError:
+            self.skipTest("lz4 is not installed")
+        raw = b"AdaptiveLz4Payload" * 32
+        compressed = lz4.block.compress(raw, store_size=False)
+
+        decoded, decoder = decode_compression(compressed, 3, len(raw))
+
+        self.assertEqual(decoded, raw)
+        self.assertEqual(decoder, "adaptive-lz4")
+
+    def test_paz_validate_dry_run_decodes_without_writing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            raw = b"Mission_A" * 20
+            compressed = zlib.compress(raw)
+            pamt = write_synthetic_pamt(root, "data/mission.bin", comp_size=len(compressed), orig_size=len(raw), flags=0x00040000)
+            (root / "0.paz").write_bytes(compressed)
+            output = root / "out"
+
+            entries = parse_pamt(pamt)
+            result = extract_entries(entries, output, decrypt_xml=False, dry_run=True, validate_only=True)
+
+            self.assertEqual(result["extracted_count"], 1)
+            self.assertEqual(result["validated_count"], 1)
+            self.assertEqual(result["decompressed_count"], 1)
+            self.assertTrue(result["entries"][0]["validated"])
+            self.assertFalse(result["entries"][0]["written"])
+            self.assertFalse((output / "testpkg" / "data" / "mission.bin").exists())
 
     def test_paz_hashlittle_uses_documented_vector(self):
         self.assertEqual(hashlittle(b"rendererconfigurationmaterial.xml", 0x000C5EDE), 0xAF3DCEF3)

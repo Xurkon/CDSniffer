@@ -25,6 +25,20 @@ XOR_DELTAS = (
     0x06060606,
     0x02020202,
 )
+PASSTHROUGH_COMPRESSION_TYPES = {0, 1}
+DECOMPRESSION_TYPES = {2, 3, 4}
+KNOWN_DECODED_PREFIXES = (
+    b"DDS ",
+    b"PAR ",
+    b"<?xml",
+    b"<root",
+    b"<",
+    b"{",
+    b"[",
+    b"RIFF",
+    b"BKHD",
+    b"\x89PNG",
+)
 
 
 class ArchiveError(RuntimeError):
@@ -52,11 +66,19 @@ class PazEntry:
 
     @property
     def compressed(self) -> bool:
+        return self.needs_decompression
+
+    @property
+    def stored_size_differs(self) -> bool:
         return self.comp_size != self.orig_size
 
     @property
     def compression_type(self) -> int:
         return (self.flags >> 16) & 0x0F
+
+    @property
+    def needs_decompression(self) -> bool:
+        return self.compression_type in DECOMPRESSION_TYPES
 
     @property
     def encrypted(self) -> bool:
@@ -75,6 +97,8 @@ class PazEntry:
             "flags_hex": f"0x{self.flags:X}",
             "paz_index": self.paz_index,
             "compressed": self.compressed,
+            "stored_size_differs": self.stored_size_differs,
+            "needs_decompression": self.needs_decompression,
             "compression_type": self.compression_type,
             "compression_name": compression_name(self.compression_type),
             "encrypted": self.encrypted,
@@ -82,7 +106,7 @@ class PazEntry:
 
 
 def compression_name(value: int) -> str:
-    return {0: "none", 2: "lz4", 3: "custom", 4: "zlib"}.get(value, f"unknown-{value}")
+    return {0: "none", 1: "raw-asset", 2: "lz4", 3: "adaptive", 4: "zlib"}.get(value, f"unknown-{value}")
 
 
 def discover_pamt_files(root: Path) -> list[Path]:
@@ -218,18 +242,30 @@ def extract_entries(
     *,
     decrypt_xml: bool = True,
     dry_run: bool = False,
+    validate_only: bool = False,
     overwrite: bool = True,
 ) -> dict[str, Any]:
+    dry_run = dry_run or validate_only
     extracted: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        output_dir.mkdir(parents=True, exist_ok=True)
 
     for entry in entries:
         try:
-            if dry_run:
+            if dry_run and not validate_only:
                 result = {"entry": entry.to_dict(), "dry_run": True, "output_path": str(safe_output_path(output_dir, entry.path))}
             else:
-                result = extract_entry(entry, output_dir, decrypt_xml=decrypt_xml, overwrite=overwrite)
+                result = extract_entry(
+                    entry,
+                    output_dir,
+                    decrypt_xml=decrypt_xml,
+                    overwrite=overwrite,
+                    write_output=not dry_run,
+                )
+                if dry_run:
+                    result["dry_run"] = True
+                    result["validated"] = True
             extracted.append(result)
         except Exception as exc:
             errors.append({"path": entry.path, "error": str(exc)})
@@ -243,13 +279,22 @@ def extract_entries(
         "error_count": len(errors),
         "decrypted_count": sum(1 for item in extracted if item.get("decrypted")),
         "decompressed_count": sum(1 for item in extracted if item.get("decompressed")),
+        "validated_count": sum(1 for item in extracted if item.get("validated")),
         "dry_run": dry_run,
+        "validation_only": validate_only,
         "entries": extracted,
         "errors": errors,
     }
 
 
-def extract_entry(entry: PazEntry, output_dir: Path, *, decrypt_xml: bool = True, overwrite: bool = True) -> dict[str, Any]:
+def extract_entry(
+    entry: PazEntry,
+    output_dir: Path,
+    *,
+    decrypt_xml: bool = True,
+    overwrite: bool = True,
+    write_output: bool = True,
+) -> dict[str, Any]:
     paz_path = Path(entry.paz_file)
     if not paz_path.exists():
         raise FileNotFoundError(f"PAZ file not found: {paz_path}")
@@ -263,19 +308,21 @@ def extract_entry(entry: PazEntry, output_dir: Path, *, decrypt_xml: bool = True
 
     decrypted = False
     decompressed = False
+    compression_decoder = "passthrough"
     if decrypt_xml and entry.encrypted:
         data = decrypt(data, Path(entry.path).name)
         decrypted = True
 
-    if entry.compressed:
-        data = decompress(data, entry.compression_type, entry.orig_size)
-        decompressed = True
+    if entry.needs_decompression:
+        data, compression_decoder = decode_compression(data, entry.compression_type, entry.orig_size)
+        decompressed = compression_decoder not in {"passthrough", "raw"}
 
     out_path = safe_output_path(output_dir, entry.path)
-    if out_path.exists() and not overwrite:
+    if write_output and out_path.exists() and not overwrite:
         raise FileExistsError(f"Output file already exists: {out_path}")
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_bytes(data)
+    if write_output:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(data)
 
     return {
         "entry": entry.to_dict(),
@@ -283,6 +330,8 @@ def extract_entry(entry: PazEntry, output_dir: Path, *, decrypt_xml: bool = True
         "size": len(data),
         "decrypted": decrypted,
         "decompressed": decompressed,
+        "compression_decoder": compression_decoder,
+        "written": write_output,
         "file_format": out_path.suffix.lower().lstrip(".") or "binary",
     }
 
@@ -307,17 +356,71 @@ def decrypt(data: bytes, filename: str) -> bytes:
 
 
 def decompress(data: bytes, compression_type: int, original_size: int) -> bytes:
-    if compression_type == 0:
-        return data
+    return decode_compression(data, compression_type, original_size)[0]
+
+
+def decode_compression(data: bytes, compression_type: int, original_size: int) -> tuple[bytes, str]:
+    if compression_type in PASSTHROUGH_COMPRESSION_TYPES:
+        return data, "passthrough"
     if compression_type == 2:
-        try:
-            import lz4.block
-        except ImportError as exc:
-            raise MissingArchiveDependency("LZ4 decompression requires lz4. Install with: pip install .[unpack]") from exc
-        return lz4.block.decompress(data, uncompressed_size=original_size)
+        return _decode_lz4(data, original_size), "lz4"
+    if compression_type == 3:
+        return _decode_adaptive(data, original_size)
     if compression_type == 4:
-        return zlib.decompress(data)
+        decoded = zlib.decompress(data)
+        _validate_original_size(decoded, original_size, "zlib")
+        return decoded, "zlib"
     raise UnsupportedCompression(f"Unsupported PAZ compression type {compression_type} ({compression_name(compression_type)})")
+
+
+def _decode_adaptive(data: bytes, original_size: int) -> tuple[bytes, str]:
+    errors: list[str] = []
+    if original_size == len(data) or _looks_decoded(data):
+        return data, "raw"
+
+    try:
+        decoded = zlib.decompress(data)
+        _validate_original_size(decoded, original_size, "adaptive-zlib")
+        return decoded, "adaptive-zlib"
+    except Exception as exc:
+        errors.append(f"zlib: {exc}")
+
+    try:
+        return _decode_lz4(data, original_size), "adaptive-lz4"
+    except Exception as exc:
+        errors.append(f"lz4: {exc}")
+
+    if _looks_decoded(data):
+        return data, "raw"
+    raise UnsupportedCompression(
+        "Unsupported PAZ adaptive compression payload; tried raw, zlib, and LZ4. "
+        + " | ".join(errors)
+    )
+
+
+def _decode_lz4(data: bytes, original_size: int) -> bytes:
+    try:
+        import lz4.block
+    except ImportError as exc:
+        raise MissingArchiveDependency("LZ4 decompression requires lz4. Install with: pip install .[unpack]") from exc
+    decoded = lz4.block.decompress(data, uncompressed_size=original_size)
+    _validate_original_size(decoded, original_size, "lz4")
+    return decoded
+
+
+def _validate_original_size(data: bytes, original_size: int, decoder: str) -> None:
+    if original_size > 0 and len(data) != original_size:
+        raise ArchiveError(f"{decoder} decoded size mismatch: expected {original_size}, got {len(data)}")
+
+
+def _looks_decoded(data: bytes) -> bool:
+    sample = data[:64].lstrip()
+    if any(sample.startswith(prefix) for prefix in KNOWN_DECODED_PREFIXES):
+        return True
+    if not sample:
+        return True
+    printable = sum(1 for byte in sample if byte in b"\r\n\t" or 32 <= byte <= 126)
+    return printable / len(sample) >= 0.85
 
 
 def derive_key_iv(filename: str) -> tuple[bytes, bytes]:
