@@ -1027,6 +1027,7 @@ class MainWindow(QMainWindow):
         summary_layout.addWidget(self.settings_preview)
         layout.addWidget(summary_box, 1)
         self.refresh_capture_summary()
+        self.refresh_target_indicator()
 
     def _init_hidden_settings(self) -> None:
         self.pid_edit = QLineEdit()
@@ -1154,8 +1155,10 @@ class MainWindow(QMainWindow):
         self._apply_default_settings()
 
     def _apply_default_settings(self) -> None:
-        self.refresh_capture_summary()
-        self.refresh_target_indicator()
+        if hasattr(self, "settings_preview"):
+            self.refresh_capture_summary()
+        if hasattr(self, "target_status"):
+            self.refresh_target_indicator()
 
     def refresh_target_indicator(self) -> None:
         try:
@@ -1631,6 +1634,8 @@ class MainWindow(QMainWindow):
         self.highlight_raw_view(query, regex=regex, case_sensitive=case_sensitive)
 
     def refresh_capture_summary(self) -> None:
+        if not hasattr(self, "settings_preview"):
+            return
         self.settings_preview.setPlainText(
             "\n".join(
                 [

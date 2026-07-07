@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed GUI startup initialization order now that PySide6 verification can instantiate the main window
 - Added a dedicated GUI `Archives` tab for building archive indexes, searching indexed PAMT/PAZ entries, correlating captures against decoded archive entries, filtering result tables, and exporting index/correlation reports
 - Added reusable SQLite archive indexing with `--archive-index` so PAMT/PAZ metadata can be searched repeatedly without reparsing every archive
 - Added archive-to-capture correlation with `--correlate-archive`, lazy decoded-entry caching, archive path filters, decoded offsets, original bytes, evidence trails, confidence scores, and generic patch skeletons
