@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,35 @@ IDENTIFIER_KEYS = {
     "quest",
     "node",
 }
+DOMAIN_TERMS = {
+    "camp",
+    "craft",
+    "dispatch",
+    "gimmick",
+    "mission",
+    "node",
+    "quest",
+    "sequencer",
+    "stage",
+}
+MISSION_FIELD_TERMS = {
+    "comrade",
+    "display name",
+    "internal name",
+    "mission",
+    "required members",
+    "reward",
+    "task time",
+}
+QUEST_FIELD_TERMS = {
+    "chain",
+    "completed",
+    "quest",
+    "stage",
+    "state",
+    "status",
+    "type",
+}
 
 
 def analyze_match_format(
@@ -35,9 +65,10 @@ def analyze_match_format(
     suffix = file_path.suffix.lower()
     file_format = _file_format(file_path, blob)
     hints: list[dict[str, Any]] = []
+    hints.extend(_path_domain_hints(file_path))
 
     if suffix in STRUCTURED_SUFFIXES:
-        hints.extend(_json_hints(blob, offset, evidence_value, hit_text))
+        hints.extend(_json_hints(blob, offset, evidence_value, hit_text, file_path))
     elif _looks_like_text(blob):
         hints.extend(_text_hints(blob, offset))
 
@@ -50,6 +81,7 @@ def analyze_match_format(
                 "details": {"suffix": suffix},
             }
         )
+        hints.extend(_paseq_hints(blob, offset))
 
     if file_format in {"binary", "paseq"}:
         hints.extend(_binary_hints(blob, offset, original))
@@ -57,7 +89,7 @@ def analyze_match_format(
     return {
         "file_format": file_format,
         "format_confidence_bonus": round(confidence_bonus, 3),
-        "format_hints": hints[:8],
+        "format_hints": hints[:12],
     }
 
 
@@ -108,7 +140,22 @@ def _line_column(text: str, offset: int) -> tuple[int, int]:
     return line, column
 
 
-def _json_hints(blob: bytes, offset: int, evidence_value: str, hit_text: str) -> list[dict[str, Any]]:
+def _path_domain_hints(file_path: Path) -> list[dict[str, Any]]:
+    normalized = str(file_path).replace("\\", "/").lower()
+    matched = sorted(term for term in DOMAIN_TERMS if term in normalized)
+    if not matched:
+        return []
+    return [
+        {
+            "kind": "domain-path",
+            "summary": f"path terms: {', '.join(matched[:6])}",
+            "confidence_bonus": 0.015,
+            "details": {"terms": matched[:12]},
+        }
+    ]
+
+
+def _json_hints(blob: bytes, offset: int, evidence_value: str, hit_text: str, file_path: Path) -> list[dict[str, Any]]:
     text = _decode_text(blob)
     if text is None:
         return []
@@ -142,10 +189,14 @@ def _json_hints(blob: bytes, offset: int, evidence_value: str, hit_text: str) ->
                     "details": {
                         "payload_index": payload_index,
                         "record_keys": match.get("record_keys", {}),
+                        "record_fields": match.get("record_fields", []),
                     },
                 }
             )
-            if len(hints) >= 8:
+            domain_hint = _json_domain_record_hint(match, file_path)
+            if domain_hint:
+                hints.append(domain_hint)
+            if len(hints) >= 12:
                 return hints
     return hints
 
@@ -188,6 +239,7 @@ def _walk_json(payload: Any, needles: list[str], path: str = "$", record: dict[s
                 "path": path,
                 "value": value_text,
                 "record_keys": _record_keys(record or {}),
+                "record_fields": _record_fields(record or {}),
             }
         )
     return matches
@@ -209,12 +261,48 @@ def _record_keys(record: dict[str, Any]) -> dict[str, str]:
     return keys
 
 
+def _record_fields(record: dict[str, Any]) -> list[str]:
+    fields: list[str] = []
+    for key, value in record.items():
+        if isinstance(value, (dict, list)):
+            continue
+        normalized = str(key).replace("_", " ").lower()
+        if normalized not in fields:
+            fields.append(normalized)
+        if len(fields) >= 24:
+            break
+    return fields
+
+
 def _json_summary(match: dict[str, Any], payload_index: int) -> str:
     record_keys = match.get("record_keys", {})
     if record_keys:
         preview = ", ".join(f"{key}={value}" for key, value in record_keys.items())
         return f"JSON record {payload_index}: {preview}"
     return f"JSON path {match['path']}"
+
+
+def _json_domain_record_hint(match: dict[str, Any], file_path: Path) -> dict[str, Any] | None:
+    record_keys = match.get("record_keys", {})
+    normalized_keys = {str(key).replace("_", " ").lower() for key in record_keys.keys()}
+    normalized_fields = set(match.get("record_fields", [])) | normalized_keys
+    normalized_path = str(file_path).replace("\\", "/").lower()
+    mission_score = len(normalized_fields & MISSION_FIELD_TERMS) + sum(1 for term in ("mission", "camp", "dispatch") if term in normalized_path)
+    quest_score = len(normalized_fields & QUEST_FIELD_TERMS) + (1 if "quest" in normalized_path else 0)
+    if mission_score <= 0 and quest_score <= 0:
+        return None
+    if mission_score >= quest_score:
+        record_type = "mission-like record"
+        fields = sorted(normalized_fields & MISSION_FIELD_TERMS)
+    else:
+        record_type = "quest-like record"
+        fields = sorted(normalized_fields & QUEST_FIELD_TERMS)
+    return {
+        "kind": "domain-record",
+        "summary": record_type if not fields else f"{record_type}: {', '.join(fields)}",
+        "confidence_bonus": 0.035,
+        "details": {"record_type": record_type, "fields": fields, "path": str(file_path)},
+    }
 
 
 def _safe_json_key(key: str) -> str:
@@ -270,6 +358,86 @@ def _binary_hints(blob: bytes, offset: int, original: bytes) -> list[dict[str, A
             }
         )
     return hints
+
+
+def _paseq_hints(blob: bytes, offset: int) -> list[dict[str, Any]]:
+    hints: list[dict[str, Any]] = []
+    timing_values = _nearby_timing_values(blob, offset)
+    if timing_values:
+        hints.append(
+            {
+                "kind": "paseq-timing",
+                "summary": "nearby PASEQ timing-like integers",
+                "confidence_bonus": 0.025,
+                "details": {"values": timing_values[:8]},
+            }
+        )
+    neighbor_strings = _neighbor_strings(blob, offset, radius=160)
+    sequence_labels = [value for value in neighbor_strings if _looks_like_sequence_label(value)]
+    if sequence_labels:
+        hints.append(
+            {
+                "kind": "paseq-labels",
+                "summary": "nearby sequence labels",
+                "confidence_bonus": 0.02,
+                "details": {"labels": sequence_labels[:6]},
+            }
+        )
+    hash_candidates = _nearby_hash_candidates(blob, offset, neighbor_strings)
+    if hash_candidates:
+        hints.append(
+            {
+                "kind": "hash-candidates",
+                "summary": "nearby 32-bit hash candidates",
+                "confidence_bonus": 0.01,
+                "details": {"candidates": hash_candidates[:6]},
+            }
+        )
+    return hints
+
+
+def _nearby_timing_values(blob: bytes, offset: int, radius: int = 24) -> list[dict[str, Any]]:
+    start = max(0, offset - radius)
+    end = min(len(blob), offset + radius)
+    values: list[dict[str, Any]] = []
+    seen: set[tuple[int, int]] = set()
+    for pos in range(start, max(start, end - 3)):
+        raw = blob[pos : pos + 4]
+        value = int.from_bytes(raw, "little")
+        if value < 1 or value > 240_000:
+            continue
+        if value % 100 not in {0, 99} and value not in {1, 30, 60}:
+            continue
+        key = (pos, value)
+        if key in seen:
+            continue
+        seen.add(key)
+        values.append({"offset": pos, "offset_hex": f"0x{pos:X}", "value": value, "hex": raw.hex(" ")})
+    return values[:16]
+
+
+def _looks_like_sequence_label(value: str) -> bool:
+    lowered = value.lower()
+    return any(term in lowered for term in ("anim", "craft", "ending", "gimmick", "loading", "mid", "mission", "seq", "start"))
+
+
+def _nearby_hash_candidates(blob: bytes, offset: int, strings: list[str], radius: int = 32) -> list[dict[str, Any]]:
+    if not strings:
+        return []
+    start = max(0, offset - radius)
+    end = min(len(blob), offset + radius)
+    nearby_values = {
+        int.from_bytes(blob[pos : pos + 4], "little")
+        for pos in range(start, max(start, end - 3))
+        if len(blob[pos : pos + 4]) == 4
+    }
+    candidates: list[dict[str, Any]] = []
+    for value in strings[:12]:
+        encoded = value.encode("utf-8", errors="ignore")
+        crc = zlib.crc32(encoded) & 0xFFFFFFFF
+        if crc in nearby_values:
+            candidates.append({"string": value, "hash": crc, "hash_hex": f"0x{crc:08X}", "algorithm": "crc32"})
+    return candidates
 
 
 def _little_endian_candidates(blob: bytes, offset: int, radius: int = 16) -> list[dict[str, Any]]:

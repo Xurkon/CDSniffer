@@ -30,7 +30,7 @@ For compiled releases, the clean target is two executables:
 - Can correlate captured strings, hit bytes, and numeric candidates back to unpacked file offsets
 - Groups duplicate evidence at the same file offset so one candidate carries its full evidence trail
 - Can compare baseline and target captures to highlight target-only file-offset candidates
-- Adds format-aware correlation hints for JSON/JSONL records, text line locations, PASEQ candidates, nearby strings, and little-endian integers
+- Adds format-aware correlation hints for domain paths, mission/quest-like JSON records, text line locations, PASEQ timing/label candidates, nearby strings, hash candidates, and little-endian integers
 - Can parse PAMT indexes and extract/validate/decode PAZ archive entries without launching an external unpacker
 - Can build a reusable SQLite PAMT/PAZ archive index for fast repeated lookups after a game patch
 - Can correlate captures directly against indexed archive entries with a lazy decoded-entry cache
@@ -313,7 +313,7 @@ Correlation results include:
 - File format, such as `json`, `paseq`, `txt`, or `binary`
 - Evidence count and evidence trail for grouped candidates
 - Confidence reasons such as exact hit bytes, text-and-bytes, nearby numeric evidence, or target-only
-- Format hints such as JSON record keys, text line/column, PASEQ candidate markers, nearby printable strings, and little-endian values
+- Format hints such as domain path terms, mission/quest-like JSON records, text line/column, PASEQ timing and sequence labels, nearby printable strings, CRC/hash candidates, and little-endian values
 - Diff status when a baseline is provided: `target-only` or `shared-with-baseline`
 - Original bytes at the file offset
 - Runtime address and module-relative RVA when available
@@ -442,7 +442,7 @@ Good next steps before opening this up more broadly:
 - [x] Add archive/file match preview in the GUI so selecting a correlation row shows decoded bytes, printable text, offset metadata, and patch skeleton context
 - [x] Add DMM-specific patch emitters on top of the generic correlation patch skeletons
 - [x] Add a guided correlation workspace that walks users through capture selection, archive/folder/file comparison, baseline selection, and export format
-- [ ] Expand format analyzers with deeper PASEQ, quest/mission table, hash, and typed record parsers
+- [x] Expand format analyzers with deeper PASEQ, quest/mission table, hash, and typed record parsers
 - [ ] Add repeat-run confidence rollups across multiple target captures
 - [ ] Add one-click extraction for the archive entry behind a selected archive correlation match
 - [ ] Add JSON schema validation gates through a `--validate-schemas` flag and optional environment variable

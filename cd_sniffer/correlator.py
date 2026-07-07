@@ -375,6 +375,16 @@ def _aggregate_confidence(group: dict[str, Any]) -> tuple[float, list[str]]:
             reasons.append("json-structure")
         if "paseq-binary" in hint_kinds:
             reasons.append("paseq-binary")
+        if "domain-record" in hint_kinds:
+            reasons.append("domain-record")
+        if "domain-path" in hint_kinds:
+            reasons.append("domain-path")
+        if "paseq-timing" in hint_kinds:
+            reasons.append("paseq-timing")
+        if "paseq-labels" in hint_kinds:
+            reasons.append("paseq-labels")
+        if "hash-candidates" in hint_kinds:
+            reasons.append("hash-candidates")
         if {"little-endian-context", "matched-integer"} & hint_kinds:
             reasons.append("little-endian-context")
         if hint_kinds and "format-context" not in reasons:

@@ -467,8 +467,11 @@ class ScannerTests(unittest.TestCase):
         hint_kinds = {hint["kind"] for hint in match["format_hints"]}
         self.assertEqual(match["file_format"], "json")
         self.assertIn("json-record", hint_kinds)
+        self.assertIn("domain-record", hint_kinds)
         self.assertIn("json-structure", match["confidence_reasons"])
+        self.assertIn("domain-record", match["confidence_reasons"])
         self.assertIn("Key=1001", match["format_hint_summary"])
+        self.assertIn("mission-like record", match["format_hint_summary"])
         self.assertGreater(result["format_hint_count"], 0)
 
     def test_correlator_adds_paseq_binary_format_hints(self):
@@ -477,7 +480,12 @@ class ScannerTests(unittest.TestCase):
             unpacked = root / "unpacked"
             unpacked.mkdir()
             target = unpacked / "mission_flow.paseq"
-            target.write_bytes(b"\x39\x30\x00\x00xxxxMission_Ayyyy")
+            target.write_bytes(
+                b"start_anim\x00"
+                + (7199).to_bytes(4, "little")
+                + zlib.crc32(b"xxxxMission_Ayyyy").to_bytes(4, "little")
+                + b"xxxxMission_Ayyyy"
+            )
             capture = root / "capture.jsonl"
             capture.write_text(json_line(capture_payload(["Mission_A"])), encoding="utf-8")
 
@@ -487,7 +495,14 @@ class ScannerTests(unittest.TestCase):
         hint_kinds = {hint["kind"] for hint in match["format_hints"]}
         self.assertEqual(match["file_format"], "paseq")
         self.assertIn("paseq-binary", hint_kinds)
+        self.assertIn("domain-path", hint_kinds)
+        self.assertIn("paseq-timing", hint_kinds)
+        self.assertIn("paseq-labels", hint_kinds)
+        self.assertIn("hash-candidates", hint_kinds)
         self.assertIn("little-endian-context", match["confidence_reasons"])
+        self.assertIn("paseq-timing", match["confidence_reasons"])
+        self.assertIn("paseq-labels", match["confidence_reasons"])
+        self.assertIn("hash-candidates", match["confidence_reasons"])
 
     def test_paz_parser_reads_synthetic_pamt(self):
         with tempfile.TemporaryDirectory() as tmpdir:
