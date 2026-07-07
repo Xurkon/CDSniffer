@@ -506,6 +506,8 @@ python -m cd_sniffer --mode hotkey --hotkey F8 --window-title "Crimson Desert" -
 
 Good next steps before opening this up more broadly:
 
+For a fuller development handoff, see [`ROADMAP_REPORT.md`](ROADMAP_REPORT.md).
+
 - [x] Add archive/file match preview in the GUI so selecting a correlation row shows decoded bytes, printable text, offset metadata, and patch skeleton context
 - [x] Add DMM-specific patch emitters on top of the generic correlation patch skeletons
 - [x] Add a guided correlation workspace that walks users through capture selection, archive/folder/file comparison, baseline selection, and export format
