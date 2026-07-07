@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Improved GUI hotkey recording so clicking the field reliably focuses capture mode and the next key press is recorded
 - Improved automatic Crimson Desert PID detection so the GUI keeps polling after launch and the window list defaults to the detected game process instead of all visible windows
 - Added sample-pack decoder fallback support for future PAZ payloads by loading exact-match compressed/decoded samples from a manifest or folder
 - Added fail-fast validation for imported settings profiles so unsupported modes and invalid numeric ranges are rejected before capture starts

@@ -16,6 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 try:
     from PySide6.QtCore import QEvent, Qt
     from PySide6.QtGui import QKeyEvent
+    from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication
 
     from cd_sniffer.cli import parse_args
@@ -72,6 +73,7 @@ class GuiSmokeTests(unittest.TestCase):
         app = QApplication.instance() or QApplication([])
         widget = HotkeyLineEdit("F8")
         try:
+            QTest.mouseClick(widget, Qt.LeftButton)
             widget.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_G, Qt.NoModifier, "g"))
             self.assertEqual(widget.text(), "G")
             widget.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_Backspace, Qt.NoModifier))

@@ -371,6 +371,18 @@ class HotkeyLineEdit(QLineEdit):
         self.setFocusPolicy(Qt.StrongFocus)
         self.setPlaceholderText("Click and press a key")
 
+    def _begin_capture(self) -> None:
+        self.setFocus(Qt.MouseFocusReason)
+        self.selectAll()
+
+    def mousePressEvent(self, event) -> None:  # noqa: ANN001 - Qt event type varies by binding
+        self._begin_capture()
+        event.accept()
+
+    def focusInEvent(self, event) -> None:  # noqa: ANN001 - Qt event type varies by binding
+        super().focusInEvent(event)
+        self.selectAll()
+
     def keyPressEvent(self, event) -> None:  # noqa: ANN001 - Qt event type varies by binding
         key = int(event.key())
         if key in {Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta}:
