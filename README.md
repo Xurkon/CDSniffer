@@ -203,6 +203,8 @@ Useful filters and safety limits:
 - `--unique-only` skips repeated hit text values already captured during the same session
 - `--summary top-hits` prints the most frequent strings after each capture
 - `--pick-window` prompts you to choose a target window if auto-detection misses
+- `--no-interactive` suppresses the fallback window picker so scripts fail cleanly when the game is not detected
+- `--hotkey-poll-interval` controls hotkey polling cadence separately from loop capture interval
 - `--timestamp-output` creates a fresh log file per session
 - `--session-name` controls the filename prefix used for timestamped logs
 - `--export-manifest` writes a sidecar JSON manifest with the exact CLI settings
@@ -368,7 +370,7 @@ Useful correlation options:
 - `--correlate-output` writes the report to a file
 - `--validate-schemas` or `CDSNIFFER_VALIDATE_SCHEMAS=1` validates correlation JSON payloads before output
 - `--dmm-export`, `--dmm-output`, `--dmm-title`, `--dmm-author`, `--dmm-version`, and `--dmm-patched-placeholder` control DMM draft export
-- `--dmm-check`, `--dmm-against`, `--dmm-check-format`, and `--dmm-check-output` control DMM overlap reports
+- `--dmm-check`, `--dmm-against`, `--dmm-check-format`, and `--dmm-check-output` control indexed DMM overlap reports grouped by normalized game file
 
 Correlation results include:
 
@@ -523,8 +525,9 @@ For a fuller development handoff, see [`ROADMAP_REPORT.md`](ROADMAP_REPORT.md).
 - [x] Make the archive workflow more resilient with preflight checks for index build, correlation, and selected-file comparison inputs
 - [x] Improve diagnostics with copyable error summaries, structured action logs, and a rollback-friendly last-good settings snapshot
 - [x] Add sample-driven decoders for any future proprietary PAZ compression payloads that are not raw, zlib, or LZ4
+- [x] Add a random session token and stale-PID checks to the localhost GUI IPC channel
 - [ ] Add a build/release script for `cdsniffer.exe` and `cdsniffer-gui.exe`
-- [ ] Add a random session token to the localhost GUI IPC channel
+- [ ] Add DMM baseline/target auto-fill for reviewed patch drafts once byte-source rules are proven
 - [ ] Split the large GUI module into smaller files once the interface settles
 
 ## Notes
@@ -536,6 +539,8 @@ For a fuller development handoff, see [`ROADMAP_REPORT.md`](ROADMAP_REPORT.md).
 - If the camp gate misses a UI state, use `--capture-gate custom` with `--gate-keyword` or `--gate-regex` from a known visible label.
 - If the process name lookup is unreliable, prefer `--window-title` or `--pid`.
 - Keep `--pick-window` as a human fallback for ambiguous process/window state; normal captures should still auto-target Crimson Desert by process name, PID, or window title.
+- Use `--no-interactive` for scheduled tasks, wrappers, or CI-style probes that should not wait for keyboard input.
+- The CLI-to-GUI IPC channel is localhost-only, token-protected per GUI session, and refuses stale state files when the recorded GUI PID is no longer running.
 - Set `CDSNIFFER_VALIDATE_SCHEMAS=1` when you want every CLI run to use schema validation without adding `--validate-schemas`.
 - The JSON schema for capture output lives in `schemas/cdsniffer-output.schema.json`.
 - The JSON schema for correlation output lives in `schemas/cdsniffer-correlation.schema.json`.

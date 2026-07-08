@@ -151,20 +151,24 @@ def build_dmm_conflict_report(candidate_path: Path, against_paths: list[Path]) -
     for path in against_paths:
         against_records.extend(dmm_change_records(load_dmm_patch_json(path), path))
 
+    against_by_file = _group_dmm_records_by_file(against_records)
+    candidate_by_file = _group_dmm_records_by_file(candidate_records)
+
     conflicts: list[dict[str, Any]] = []
     for candidate in candidate_records:
-        for existing in against_records:
+        for existing in against_by_file.get(_normalized_dmm_game_file(candidate), []):
             conflict = _dmm_overlap(candidate, existing)
             if conflict:
                 conflicts.append(conflict)
 
     internal_conflicts: list[dict[str, Any]] = []
-    for index, left in enumerate(candidate_records):
-        for right in candidate_records[index + 1 :]:
-            conflict = _dmm_overlap(left, right)
-            if conflict:
-                conflict["conflict_scope"] = "candidate-internal"
-                internal_conflicts.append(conflict)
+    for records in candidate_by_file.values():
+        for index, left in enumerate(records):
+            for right in records[index + 1 :]:
+                conflict = _dmm_overlap(left, right)
+                if conflict:
+                    conflict["conflict_scope"] = "candidate-internal"
+                    internal_conflicts.append(conflict)
 
     return {
         "schema": "dmm-conflict-report",
@@ -260,6 +264,17 @@ def _dmm_overlap(candidate: dict[str, Any], existing: dict[str, Any]) -> dict[st
         "existing_length": existing["length"],
         "existing_original": existing["original"],
     }
+
+
+def _normalized_dmm_game_file(record: dict[str, Any]) -> str:
+    return str(record.get("game_file") or "").replace("\\", "/").lower()
+
+
+def _group_dmm_records_by_file(records: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for record in records:
+        grouped[_normalized_dmm_game_file(record)].append(record)
+    return grouped
 
 
 def _int_or_none(value: Any) -> int | None:

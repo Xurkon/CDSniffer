@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import importlib
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -24,10 +25,7 @@ def schema_validation_requested(explicit: bool = False) -> bool:
 
 
 def validate_payload_schema(payload: dict[str, Any], schema_name: str) -> None:
-    try:
-        from jsonschema import Draft202012Validator
-    except ImportError as exc:  # pragma: no cover - exercised only without optional dependency
-        raise RuntimeError("Schema validation requires `pip install cdsniffer[schema]` or `pip install jsonschema`.") from exc
+    Draft202012Validator = load_jsonschema_validator()
 
     schema = load_schema(schema_name)
     validator = Draft202012Validator(schema)
@@ -37,6 +35,18 @@ def validate_payload_schema(payload: dict[str, Any], schema_name: str) -> None:
     first = errors[0]
     path = "$" + "".join(f"[{part!r}]" if isinstance(part, str) else f"[{part}]" for part in first.absolute_path)
     raise ValueError(f"{schema_name} schema validation failed at {path}: {first.message}")
+
+
+def load_jsonschema_validator() -> Any:
+    try:
+        jsonschema = importlib.import_module("jsonschema")
+    except ImportError as exc:  # pragma: no cover - exercised only without optional dependency
+        missing = exc.name or str(exc)
+        raise RuntimeError(
+            "Schema validation requires `pip install cdsniffer[schema]` or `pip install jsonschema`. "
+            f"Import failed for `{missing}`: {exc}"
+        ) from exc
+    return jsonschema.Draft202012Validator
 
 
 @lru_cache(maxsize=None)

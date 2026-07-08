@@ -10,7 +10,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cd_sniffer.cli import build_comparison, load_signature_pack, timestamped_output_path
+from cd_sniffer import dmm as dmm_module
+from cd_sniffer.cli import build_comparison, load_signature_pack, main as cli_main, parse_args, timestamped_output_path
 from cd_sniffer.archive_index import (
     build_archive_index,
     correlate_capture_to_archive,
@@ -42,9 +43,10 @@ from cd_sniffer.paz_archive import (
     parse_pamt,
     PazEntry,
 )
-from cd_sniffer.schema_validation import schema_validation_requested, validate_payload_schema
+from cd_sniffer.schema_validation import load_jsonschema_validator, schema_validation_requested, validate_payload_schema
 from cd_sniffer.core import (
     build_capture_gate_filters,
+    build_manifest,
     capture_gate_matches,
     filter_payload_unique_hits,
     render_search_results_csv,
@@ -53,6 +55,8 @@ from cd_sniffer.core import (
     search_capture_file,
     search_flattened_hits,
     search_payload_values,
+    sanitize_manifest_value,
+    write_rendered_snapshot,
 )
 from cd_sniffer.scanner import RegionScan, MemoryHit, build_hit_context, extract_strings, filter_hits, summarize_top_hits
 from cd_sniffer.windows import is_key_triggered, vk_from_name
@@ -854,6 +858,68 @@ class ScannerTests(unittest.TestCase):
         with patch.dict("os.environ", {"CDSNIFFER_VALIDATE_SCHEMAS": "0"}):
             self.assertFalse(schema_validation_requested())
 
+    def test_schema_validation_reports_transitive_import_failure(self):
+        with patch(
+            "cd_sniffer.schema_validation.importlib.import_module",
+            side_effect=ModuleNotFoundError("No module named 'rpds.rpds'", name="rpds.rpds"),
+        ):
+            with self.assertRaises(RuntimeError) as context:
+                load_jsonschema_validator()
+
+        self.assertIn("rpds.rpds", str(context.exception))
+
+    def test_manifest_sanitizer_uses_redaction_registry(self):
+        sanitized = sanitize_manifest_value(
+            {
+                "pid": 123,
+                "api_token": "secret",
+                "nested": {"pid": 456, "path": Path("captures/run.jsonl")},
+            },
+            frozenset({"pid", "api_token"}),
+        )
+
+        self.assertNotIn("pid", sanitized)
+        self.assertNotIn("api_token", sanitized)
+        self.assertNotIn("pid", sanitized["nested"])
+        self.assertEqual(sanitized["nested"]["path"], str(Path("captures/run.jsonl")))
+
+    def test_build_manifest_redacts_pid_from_settings(self):
+        args = argparse.Namespace(pid=999, output="logs/test.jsonl", process="Crimson Desert")
+        manifest = build_manifest(args, 123, Path("logs/test.jsonl"))
+
+        self.assertEqual(manifest["pid"], 123)
+        self.assertNotIn("pid", manifest["settings"])
+
+    def test_markdown_snapshot_append_uses_nested_sections(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "capture.md"
+            payload = capture_payload(["Mission_A"])
+            payload.update({"timestamp": "2026-01-01T00:00:00Z", "pid": 1, "process": "Crimson Desert"})
+
+            write_rendered_snapshot(output_path, payload, "markdown")
+            write_rendered_snapshot(output_path, payload, "markdown")
+            lines = output_path.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(lines.count("# CDSniffer Snapshot"), 1)
+        self.assertEqual(lines.count("## CDSniffer Snapshot"), 1)
+
+    def test_no_interactive_suppresses_fallback_window_prompt(self):
+        with patch.object(sys, "argv", ["cdsniffer", "--no-interactive"]), patch(
+            "cd_sniffer.cli.resolve_pid", return_value=None
+        ), patch("cd_sniffer.cli.prompt_for_window") as prompt, patch.object(sys.stdin, "isatty", return_value=True), patch(
+            "builtins.print"
+        ):
+            result = cli_main()
+
+        self.assertEqual(result, 1)
+        prompt.assert_not_called()
+
+    def test_parse_args_accepts_hotkey_poll_interval(self):
+        with patch.object(sys, "argv", ["cdsniffer", "--hotkey-poll-interval", "0.1"]):
+            args = parse_args()
+
+        self.assertEqual(args.hotkey_poll_interval, 0.1)
+
     def test_export_cached_archive_match_writes_decoded_file_and_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1010,6 +1076,46 @@ class ScannerTests(unittest.TestCase):
 
         self.assertFalse(report["has_conflicts"])
         self.assertEqual(report["conflict_count"], 0)
+
+    def test_dmm_conflict_report_indexes_records_by_game_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            candidate = root / "candidate.json"
+            existing = root / "existing.json"
+            candidate.write_text(
+                json.dumps(
+                    {
+                        "patches": [
+                            {"game_file": "a.bin", "changes": [{"offset": 0, "original": "AA"}]},
+                            {"game_file": "b.bin", "changes": [{"offset": 0, "original": "BB"}]},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            existing.write_text(
+                json.dumps(
+                    {
+                        "patches": [
+                            {"game_file": "a.bin", "changes": [{"offset": 0, "original": "AA"}]},
+                            {"game_file": "c.bin", "changes": [{"offset": 0, "original": "CC"}]},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            overlap_calls: list[tuple[str, str]] = []
+            original_overlap = dmm_module._dmm_overlap
+
+            def counted_overlap(left: dict, right: dict) -> dict | None:
+                overlap_calls.append((left["game_file"], right["game_file"]))
+                return original_overlap(left, right)
+
+            with patch("cd_sniffer.dmm._dmm_overlap", side_effect=counted_overlap):
+                report = build_dmm_conflict_report(candidate, [existing])
+
+        self.assertTrue(report["has_conflicts"])
+        self.assertEqual(overlap_calls, [("a.bin", "a.bin")])
 
     def test_paz_hashlittle_uses_documented_vector(self):
         self.assertEqual(hashlittle(b"rendererconfigurationmaterial.xml", 0x000C5EDE), 0xAF3DCEF3)

@@ -304,6 +304,28 @@ MiniMax-M3's audit is high-signal and should be treated as the active backlog fo
 5. **Format analyzer coverage** - protect the growing binary/JSON hint surface before adding more heuristics.
 6. **CLI handler extraction** - worthwhile cleanup once the above behavior is stable.
 
+### Implementation Update — July 8, 2026
+
+**Status:** first high-confidence audit batch implemented.
+
+Implemented in this pass:
+
+- **N4 / F1 GUI IPC auth token + PID liveness:** `GuiIpcServer` now creates a random per-session token, writes it to the IPC state file, validates it on every command, and `send_gui_command()` refuses stale state files when the recorded GUI PID is not running.
+- **N1 Markdown append consistency:** appended markdown captures now remain self-contained snapshot sections, with the first capture as `# CDSniffer Snapshot` and later appends as `## CDSniffer Snapshot`.
+- **N2 Manifest redaction registry:** `sanitize_manifest_value()` now uses the named `MANIFEST_REDACT_KEYS` registry instead of an inline `{pid}` filter, and callers can pass a custom redaction set for future sensitive fields.
+- **N7 schema transitive-import diagnostics:** `validate_payload_schema()` now reports the actual missing import module, such as `rpds.rpds`, instead of only suggesting that `jsonschema` may be missing.
+- **N8 `--no-interactive`:** CLI users can now suppress the fallback TTY window picker for scheduled tasks, wrappers, and probes.
+- **N5 hotkey polling clamp documentation:** `--hotkey-poll-interval` is now an explicit CLI option, so hotkey polling cadence no longer has to be inferred from the clamped `--interval` behavior.
+- **N9 DMM conflict scaling:** conflict checks now index candidate and existing changes by normalized `game_file` before comparing byte ranges.
+
+Still intentionally deferred:
+
+- **N10 / F3 DMM auto-fill from baseline:** still valuable, but it should not be implemented until the tool can prove which baseline/target bytes should become reviewed `patched` values. Generating plausible-looking wrong patch bytes would be worse than blank placeholders.
+- **N11/N12 CLI handler extraction:** still worthwhile, but better done as a dedicated refactor after current behavior remains stable through real-use testing.
+- **F6 format analyzer coverage:** still recommended as the next correctness-safety investment for the growing parser/hint surface.
+
+Verification: `python -m unittest discover -s tests` passed 73 tests. New coverage includes IPC unauthorized/stale-token behavior, manifest redaction, markdown append headings, schema missing-module diagnostics, `--no-interactive`, explicit hotkey poll parsing, and DMM game-file indexing.
+
 ---
 
 ## Table of Contents
@@ -311,6 +333,7 @@ MiniMax-M3's audit is high-signal and should be treated as the active backlog fo
 0. [Maintainer Follow-Up](#maintainer-follow-up)
 0a. [Audit Update — July 7, 2026 (Second Pass)](#audit-update--july-7-2026-second-pass)
 0b. [Audit Update — July 8, 2026 (Codex Verification)](#audit-update--july-8-2026-codex-verification)
+0c. [Implementation Update — July 8, 2026](#implementation-update--july-8-2026)
 1. [What's Done Well](#1-whats-done-well)
 2. [What's Bad / Needs Improvement](#2-whats-bad--needs-improvement)
 3. [Useful Features to Add](#3-useful-features-to-add)

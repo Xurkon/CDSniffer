@@ -31,6 +31,12 @@ CAMP_MISSION_GATE_KEYWORDS = [
     "Total Reward",
 ]
 
+MANIFEST_REDACT_KEYS = frozenset(
+    {
+        "pid",
+    }
+)
+
 CAPTURE_GATE_MODES = ("off", "camp-mission", "custom")
 CAPTURE_GATE_MATCH_MODES = ("any", "all")
 
@@ -245,15 +251,15 @@ def validate_regex_patterns(patterns: list[str] | None, context: str) -> None:
             raise ValueError(f"Invalid regex in {context}: {pattern!r} ({exc})") from exc
 
 
-def sanitize_manifest_value(value: Any) -> Any:
+def sanitize_manifest_value(value: Any, redact_keys: frozenset[str] = MANIFEST_REDACT_KEYS) -> Any:
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, list):
-        return [sanitize_manifest_value(item) for item in value]
+        return [sanitize_manifest_value(item, redact_keys) for item in value]
     if isinstance(value, tuple):
-        return [sanitize_manifest_value(item) for item in value]
+        return [sanitize_manifest_value(item, redact_keys) for item in value]
     if isinstance(value, dict):
-        return {key: sanitize_manifest_value(item) for key, item in value.items() if key not in {"pid"}}
+        return {key: sanitize_manifest_value(item, redact_keys) for key, item in value.items() if str(key) not in redact_keys}
     return value
 
 
@@ -617,9 +623,10 @@ def render_csv_snapshot(payload: dict[str, Any]) -> str:
     return buffer.getvalue()
 
 
-def render_markdown_snapshot(payload: dict[str, Any]) -> str:
+def render_markdown_snapshot(payload: dict[str, Any], *, heading_level: int = 1) -> str:
+    heading = "#" * max(1, heading_level)
     lines = [
-        "# CDSniffer Snapshot",
+        f"{heading} CDSniffer Snapshot",
         "",
         f"- Timestamp: `{payload.get('timestamp', '')}`",
         f"- PID: `{payload.get('pid', '')}`",
@@ -656,7 +663,10 @@ def write_rendered_snapshot(output_path: Path, payload: dict[str, Any], fmt: str
             fh.write(rendered)
         return
     if fmt == "markdown":
-        rendered = render_markdown_snapshot(payload)
+        heading_level = 2 if output_path.exists() and output_path.stat().st_size > 0 else 1
+        rendered = render_markdown_snapshot(payload, heading_level=heading_level)
+        if heading_level > 1:
+            rendered = "\n" + rendered
         with output_path.open("a", encoding="utf-8") as fh:
             fh.write(rendered)
         return

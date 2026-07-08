@@ -87,9 +87,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--window-title", action="append", dest="window_titles", help="Window title fragment to locate")
     parser.add_argument("--window-filter-regex", action="append", dest="window_filter_patterns", help="Regex that must match the window title")
     parser.add_argument("--pick-window", action="store_true", help="Interactively choose from matching windows")
+    parser.add_argument("--no-interactive", action="store_true", help="Do not prompt for a window when automatic PID detection fails")
     parser.add_argument("--list-windows", action="store_true", help="List matching windows and exit")
     parser.add_argument("--mode", choices=["once", "loop", "hotkey"], default="loop", help="Capture mode")
     parser.add_argument("--hotkey", default="F8", help="Polling hotkey for hotkey mode")
+    parser.add_argument(
+        "--hotkey-poll-interval",
+        type=float,
+        help="Seconds between hotkey state checks; defaults to --interval clamped between 0.05 and 0.25 seconds",
+    )
     parser.add_argument("--interval", type=float, default=2.0, help="Seconds between loop captures")
     parser.add_argument("--captures", type=int, help="Stop after this many captures")
     parser.add_argument("--output", default="logs/cdsniffer.jsonl", help="Output file path")
@@ -667,6 +673,8 @@ def main() -> int:
             raise ValueError("--context-bytes cannot be negative")
         if args.context_number_radius < 0:
             raise ValueError("--context-number-radius cannot be negative")
+        if args.hotkey_poll_interval is not None and args.hotkey_poll_interval <= 0:
+            raise ValueError("--hotkey-poll-interval must be greater than 0")
         validate_regex_patterns(args.include_patterns, "--include-regex")
         validate_regex_patterns(args.exclude_patterns, "--exclude-regex")
         validate_regex_patterns(args.window_filter_patterns, "--window-filter-regex")
@@ -681,7 +689,7 @@ def main() -> int:
     if not pid and args.pick_window:
         pid = prompt_for_window(args)
         prompted = True
-    if not pid and sys.stdin.isatty() and not prompted:
+    if not pid and sys.stdin.isatty() and not prompted and not args.no_interactive:
         pid = prompt_for_window(args)
     if not pid:
         print(f"Could not find process matching: {args.process}")
@@ -692,6 +700,11 @@ def main() -> int:
     log_message(args, f"Game detected: attached to PID {pid}. Logging to {output_path}")
     if args.mode == "hotkey":
         log_message(args, f"Press {args.hotkey} to capture a snapshot. Ctrl+C to stop.")
+    hotkey_poll_interval = args.hotkey_poll_interval
+    if hotkey_poll_interval is None:
+        hotkey_poll_interval = max(0.05, min(args.interval, 0.25))
+        if args.mode == "hotkey" and hotkey_poll_interval != args.interval:
+            log_message(args, f"Hotkey polling interval derived from --interval and clamped to {hotkey_poll_interval:.2f}s.", verbose_only=True)
     try:
         hotkey_vk = vk_from_name(args.hotkey)
     except ValueError as exc:
@@ -769,7 +782,7 @@ def main() -> int:
                 if payload is None:
                     log_message(args, skip_message or "Capture skipped.")
                     last_hotkey_state = current_state
-                    time.sleep(max(0.05, min(args.interval, 0.25)))
+                    time.sleep(hotkey_poll_interval)
                     continue
                 write_and_report_payload(args, output_path, payload)
                 previous_payload = payload
@@ -779,7 +792,7 @@ def main() -> int:
                     log_message(args, "Capture limit reached.")
                     return 0
             last_hotkey_state = current_state
-            time.sleep(max(0.05, min(args.interval, 0.25)))
+            time.sleep(hotkey_poll_interval)
     except KeyboardInterrupt:
         log_message(args, "Stopped.")
     finally:

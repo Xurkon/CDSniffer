@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Hardened GUI IPC with a per-session auth token and stale-PID rejection before CLI commands connect to the GUI socket
+- Added `--no-interactive` so scripted CLI runs can fail cleanly instead of opening the fallback window picker when Crimson Desert is not detected
+- Added `--hotkey-poll-interval` to make hotkey polling cadence explicit instead of hiding the clamp behind `--interval`
+- Improved markdown capture append behavior so later snapshots are nested sections instead of repeated top-level documents
+- Added a manifest redaction registry and clearer transitive `jsonschema` import diagnostics
+- Optimized DMM conflict checks by indexing candidate and existing changes by normalized game file before range comparison
 - Fixed archive index and cache paths so the GUI and CLI resolve relative archive outputs against the project repo instead of the launch directory, avoiding Windows permission failures when building the index
 - Added a visible hotkey capture state prompt in the settings dialog so users can see when the field is ready for recording and when a key has been captured
 - Improved GUI hotkey recording so clicking the field reliably focuses capture mode and the next key press is recorded

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import queue
 import os
+import secrets
 import socket
 import tempfile
 import threading
@@ -13,6 +14,7 @@ from typing import Any, Callable
 
 
 GUI_IPC_STATE_FILE = Path(tempfile.gettempdir()) / "cdsniffer_gui_ipc.json"
+GUI_IPC_TOKEN_BYTES = 32
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,7 @@ class GuiIpcServer(threading.Thread):
         self._stop_event = threading.Event()
         self._server_socket: socket.socket | None = None
         self.bound_port: int | None = None
+        self.token = secrets.token_urlsafe(GUI_IPC_TOKEN_BYTES)
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -54,6 +57,7 @@ class GuiIpcServer(threading.Thread):
             "host": self.host,
             "port": self.bound_port,
             "pid": os.getpid(),
+            "token": self.token,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         GUI_IPC_STATE_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -95,7 +99,9 @@ class GuiIpcServer(threading.Thread):
             command = str(request.get("command", "")).strip()
             payload = dict(request.get("payload") or {})
             response: dict[str, Any]
-            if command == "status":
+            if request.get("token") != self.token:
+                response = {"ok": False, "error": "Unauthorized GUI IPC request."}
+            elif command == "status":
                 response = {"ok": True, "state": self.state_provider()}
             elif command in {"start", "stop", "show", "hide", "open-settings", "refresh", "apply-settings", "select-tab"}:
                 self.command_queue.put(GuiCommand(command=command, payload=payload))
@@ -120,15 +126,37 @@ def read_gui_ipc_state() -> dict[str, Any] | None:
         return None
 
 
+def _ipc_pid_is_running(pid: int) -> bool:
+    try:
+        from .windows import is_pid_running
+
+        return is_pid_running(pid)
+    except Exception:
+        return False
+
+
+def _state_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def send_gui_command(command: str, payload: dict[str, Any] | None = None, timeout: float = 1.5) -> dict[str, Any]:
     state = read_gui_ipc_state()
     if not state:
         return {"ok": False, "error": "No CDSniffer GUI IPC endpoint found."}
     host = str(state.get("host", "127.0.0.1"))
-    port = int(state.get("port", 0))
+    port = _state_int(state.get("port"))
+    token = str(state.get("token") or "")
+    pid = _state_int(state.get("pid"))
+    if pid <= 0 or not _ipc_pid_is_running(pid):
+        return {"ok": False, "error": "Stale CDSniffer GUI IPC endpoint: GUI process is not running."}
+    if not token:
+        return {"ok": False, "error": "CDSniffer GUI IPC state is missing an auth token. Restart the GUI."}
     if port <= 0:
         return {"ok": False, "error": "Invalid GUI IPC port."}
-    request = {"command": command, "payload": payload or {}}
+    request = {"command": command, "payload": payload or {}, "token": token}
     with socket.create_connection((host, port), timeout=timeout) as client:
         client.sendall((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
         client.shutdown(socket.SHUT_WR)

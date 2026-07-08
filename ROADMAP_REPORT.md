@@ -14,7 +14,7 @@ The codebase is currently in a strong usable state:
 - GUI state and defaults are aligned with CLI defaults.
 - Capture, live search, archive indexing, archive correlation, and DMM export flows are implemented.
 - Archive extraction and correlation can operate without an external unpacker.
-- The latest test suite run passed: `58` tests.
+- The latest test suite run passed: `73` tests.
 
 ## 2. Current State Of The App
 
@@ -120,20 +120,21 @@ Suggested deliverables:
 
 ### 3.2 GUI IPC hardening
 
-Priority: High
+Status: Implemented July 8, 2026
 
-Add a random session token to the localhost GUI IPC channel.
+The localhost GUI IPC channel now writes a per-session random token to the temp IPC state file, requires that token on every command, and refuses stale state files when the recorded GUI PID is no longer running.
 
 Why this matters:
 
 - The GUI already exposes localhost control commands.
 - A token prevents accidental or unauthorized control by another local process.
 
-Suggested deliverables:
+Implemented deliverables:
 
 - Token generation at GUI startup.
 - Token validation for IPC clients.
 - CLI support for passing the token automatically when controlling the GUI.
+- Stale PID rejection before a CLI command connects to the recorded GUI socket.
 - Documentation updates for startup and control commands.
 
 ### 3.3 GUI refactor into smaller widgets
@@ -212,7 +213,7 @@ Why this matters:
 If a future agent is picking up the project, the best sequence is:
 
 1. Build/release script for the two executables.
-2. Random session token for GUI IPC.
+2. DMM baseline/target auto-fill research for reviewed patch drafts.
 3. GUI refactor plan and first extraction pass.
 4. Archive workflow polish for selecting and comparing decoded files.
 5. Extra validation polish for imported profiles and file/path workflows.
@@ -221,7 +222,7 @@ If a future agent is picking up the project, the best sequence is:
 ## 5. Open Technical Risks
 
 - `gui.py` remains large and still carries maintenance risk.
-- The localhost IPC channel is functional but not yet token-protected.
+- DMM patch drafts still require human-reviewed `patched` values unless the user supplies an explicit placeholder.
 - Sample-pack decoding is intentionally conservative and will not magically decode unknown compression schemes without matched training samples.
 - Some release mechanics are still manual because there is no build script yet.
 
@@ -250,4 +251,3 @@ Last verified result:
   - GUI workflows
   - tests
 - If a task touches user-facing settings, update the hover tips and README examples at the same time.
-
