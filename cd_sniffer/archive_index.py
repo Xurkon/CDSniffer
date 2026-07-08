@@ -166,11 +166,20 @@ def build_archive_index(
     patterns: list[str] | None = None,
     limit: int | None = None,
     replace: bool = True,
+    progress_callback: Any | None = None,
 ) -> dict[str, Any]:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     entries = load_archive_entries(roots, paz_dir=paz_dir)
     entries = filter_archive_entries(entries, patterns=patterns, limit=limit)
-    indexed_entries = [_indexed_entry_from_paz(entry, roots) for entry in entries]
+    indexed_entries: list[IndexedArchiveEntry] = []
+    total = len(entries)
+    if progress_callback is not None:
+        progress_callback(0, total, None)
+    step = max(1, total // 20) if total else 1
+    for index, entry in enumerate(entries, start=1):
+        indexed_entries.append(_indexed_entry_from_paz(entry, roots))
+        if progress_callback is not None and (index == 1 or index == total or index % step == 0):
+            progress_callback(index, total, entry.path)
 
     with closing(sqlite3.connect(db_path)) as conn:
         if replace:

@@ -55,7 +55,7 @@ from cd_sniffer.core import (
     search_payload_values,
 )
 from cd_sniffer.scanner import RegionScan, MemoryHit, build_hit_context, extract_strings, filter_hits, summarize_top_hits
-from cd_sniffer.windows import vk_from_name
+from cd_sniffer.windows import is_key_triggered, vk_from_name
 
 
 class ScannerTests(unittest.TestCase):
@@ -101,6 +101,12 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(vk_from_name("f8"), 0x77)
         self.assertEqual(vk_from_name("space"), 0x20)
         self.assertEqual(vk_from_name("a"), 0x41)
+
+    def test_is_key_triggered_accepts_recent_key_presses(self):
+        with patch("cd_sniffer.windows.user32.GetAsyncKeyState", return_value=0x8001):
+            self.assertTrue(is_key_triggered(0x77))
+        with patch("cd_sniffer.windows.user32.GetAsyncKeyState", return_value=0x0000):
+            self.assertFalse(is_key_triggered(0x77))
 
     def test_summarize_top_hits_counts_duplicates(self):
         regions = [
@@ -736,6 +742,26 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(entries[0].path, "testpkg/data/mission.paseq")
             self.assertEqual(entries[0].compression_name, "none")
             self.assertEqual(entries[0].extension, ".paseq")
+
+    def test_archive_index_reports_progress_updates(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            pamt = write_synthetic_pamt(root, "data/mission.paseq", comp_size=18, orig_size=18, flags=0)
+            (root / "0.paz").write_bytes(b"Mission_Index_Test")
+            db_path = root / "archive-index.sqlite"
+            progress_updates: list[tuple[int, int, str | None]] = []
+
+            build_archive_index(
+                db_path,
+                [pamt],
+                patterns=["*.paseq"],
+                progress_callback=lambda current, total, entry_path: progress_updates.append((current, total, entry_path)),
+            )
+
+            self.assertGreaterEqual(len(progress_updates), 2)
+            self.assertEqual(progress_updates[0][:2], (0, 1))
+            self.assertEqual(progress_updates[-1][:2], (1, 1))
+            self.assertIsNotNone(progress_updates[-1][2])
 
     def test_archive_correlation_uses_lazy_decoded_cache(self):
         with tempfile.TemporaryDirectory() as tmpdir:

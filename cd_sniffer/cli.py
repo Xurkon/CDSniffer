@@ -69,7 +69,7 @@ from .paz_archive import (
 )
 from .paths import project_logs_dir, project_root, resolve_project_path
 from .schema_validation import schema_validation_requested, validate_payload_schema
-from .windows import is_key_down
+from .windows import is_key_triggered
 
 
 def parse_args() -> argparse.Namespace:
@@ -754,7 +754,7 @@ def main() -> int:
         captures = 0
         last_hotkey_state = False
         while True:
-            current_state = is_key_down(hotkey_vk)
+            current_state = is_key_triggered(hotkey_vk)
             if current_state and not last_hotkey_state:
                 payload, skip_message = prepare_capture_payload(
                     handle,

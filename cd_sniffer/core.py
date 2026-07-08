@@ -17,7 +17,6 @@ from .windows import (
     enum_windows,
     find_pids_by_window_title,
     get_window_pid,
-    is_key_down,
     is_pid_running,
     open_process,
     vk_from_name,

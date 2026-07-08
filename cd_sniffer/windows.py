@@ -307,6 +307,11 @@ def is_key_down(vk_code: int) -> bool:
     return bool(state & 0x8000)
 
 
+def is_key_triggered(vk_code: int) -> bool:
+    state = user32.GetAsyncKeyState(vk_code)
+    return bool(state & 0x8001)
+
+
 def is_process_running(handle: int) -> bool:
     exit_code = wintypes.DWORD()
     if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):

@@ -153,7 +153,7 @@ from .core import (
     write_snapshot,
 )
 from .ipc import GuiCommand, GuiIpcServer
-from .windows import close_handle, get_window_pid, is_key_down, is_process_running, open_process, vk_from_name
+from .windows import close_handle, get_window_pid, is_key_triggered, is_process_running, open_process, vk_from_name
 
 
 def apply_modern_theme(app: QApplication) -> None:
@@ -1018,7 +1018,7 @@ class CaptureWorker(QObject):
                         last_state = False
                         continue
                     args.pid = pid
-                    current_state = is_key_down(hotkey_vk)
+                    current_state = is_key_triggered(hotkey_vk)
                     if current_state and not last_state:
                         started = time.perf_counter()
                         payload, skip_message = self._capture_payload(
@@ -1075,12 +1075,25 @@ class ArchiveTaskWorker(QObject):
             if self.task == "build-index":
                 roots = [Path(item) for item in self.params.get("roots", [])]
                 self.status.emit(f"Building archive index from {len(roots)} root(s)...")
+
+                def report_progress(current: int, total: int, entry_path: str | None) -> None:
+                    if total <= 0:
+                        self.status.emit("Indexing archive entries...")
+                        return
+                    percent = int(round((current / total) * 100)) if current > 0 else 0
+                    if current <= 0:
+                        self.status.emit(f"Indexing archive entries: 0/{total} (0%)")
+                        return
+                    detail = f" - {entry_path}" if entry_path else ""
+                    self.status.emit(f"Indexing archive entries: {current}/{total} ({percent}%) {detail}".rstrip())
+
                 result = build_archive_index(
                     Path(self.params["db_path"]),
                     roots,
                     paz_dir=Path(self.params["paz_dir"]) if self.params.get("paz_dir") else None,
                     patterns=self.params.get("patterns") or None,
                     limit=self.params.get("limit"),
+                    progress_callback=report_progress,
                 )
                 self.result.emit(self.task, result)
                 return
