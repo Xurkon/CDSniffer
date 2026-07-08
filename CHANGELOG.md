@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed archive index and cache paths so the GUI and CLI resolve relative archive outputs against the project repo instead of the launch directory, avoiding Windows permission failures when building the index
 - Added a visible hotkey capture state prompt in the settings dialog so users can see when the field is ready for recording and when a key has been captured
 - Improved GUI hotkey recording so clicking the field reliably focuses capture mode and the next key press is recorded
 - Improved automatic Crimson Desert PID detection so the GUI keeps polling after launch and the window list defaults to the detected game process instead of all visible windows

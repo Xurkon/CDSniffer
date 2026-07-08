@@ -67,6 +67,7 @@ from .paz_archive import (
     render_archive_csv,
     render_archive_markdown,
 )
+from .paths import project_logs_dir, project_root, resolve_project_path
 from .schema_validation import schema_validation_requested, validate_payload_schema
 from .windows import is_key_down
 
@@ -179,7 +180,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dmm-check-output", help="Optional file path to write DMM conflict report")
     parser.add_argument("--correlate-archive", help="Capture JSON/JSONL file to correlate against indexed PAMT/PAZ archive entries")
     parser.add_argument("--correlate-archive-index", help="Archive index database to use; defaults to --archive-index-db")
-    parser.add_argument("--correlate-archive-cache", default="logs/archive-cache", help="Decoded archive cache directory for archive correlation")
+    parser.add_argument("--correlate-archive-cache", default=str(project_logs_dir() / "archive-cache"), help="Decoded archive cache directory for archive correlation")
     parser.add_argument("--correlate-archive-glob", action="append", dest="correlate_archive_globs", help="Archive entry glob to include during archive correlation; may be repeated")
     parser.add_argument("--correlate-archive-term", action="append", dest="correlate_archive_terms", help="Archive path substring to include during archive correlation; may be repeated")
     parser.add_argument("--correlate-archive-max-entries", type=int, default=2000, help="Maximum indexed archive entries to decode during archive correlation")
@@ -189,7 +190,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--archive-list", action="store_true", help="List PAMT/PAZ entries using the built-in parser")
     parser.add_argument("--archive-extract", action="store_true", help="Extract matching PAMT/PAZ entries using the built-in unpacker")
     parser.add_argument("--archive-index", action="store_true", help="Build a reusable SQLite index of PAMT/PAZ archive entries")
-    parser.add_argument("--archive-index-db", default="logs/cdsniffer-archive-index.sqlite", help="SQLite database path used by --archive-index and archive correlation")
+    parser.add_argument("--archive-index-db", default=str(project_logs_dir() / "cdsniffer-archive-index.sqlite"), help="SQLite database path used by --archive-index and archive correlation")
     parser.add_argument("--archive-filter", action="append", dest="archive_filters", help="Archive entry glob or substring filter; may be repeated")
     parser.add_argument("--archive-limit", type=int, help="Maximum archive entries to list or extract")
     parser.add_argument("--archive-all", action="store_true", help="Allow extracting all matched entries when no filter or limit is supplied")
@@ -385,8 +386,9 @@ def main() -> int:
             print(f"Archive PAZ directory not found: {paz_dir}")
             return 1
         try:
+            index_db = resolve_project_path(args.archive_index_db, base_dir=project_root())
             result = build_archive_index(
-                Path(args.archive_index_db),
+                index_db,
                 archive_roots,
                 paz_dir=paz_dir,
                 patterns=args.archive_filters,
@@ -404,7 +406,7 @@ def main() -> int:
         else:
             rendered = json.dumps(result, ensure_ascii=False, indent=2)
         if args.archive_report_output:
-            out_path = Path(args.archive_report_output)
+            out_path = resolve_project_path(args.archive_report_output, base_dir=project_root())
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(rendered, encoding="utf-8")
             print(json.dumps({"written": str(out_path), "format": args.archive_format}, ensure_ascii=False, indent=2))
@@ -440,7 +442,7 @@ def main() -> int:
                 entries = filter_archive_entries(entries, patterns=args.archive_filters, limit=args.archive_limit)
                 result = extract_entries(
                     entries,
-                    Path(args.archive_output or "."),
+                    resolve_project_path(args.archive_output or ".", base_dir=project_root()),
                     decrypt_xml=not args.archive_no_decrypt,
                     dry_run=args.archive_dry_run or args.archive_validate,
                     validate_only=args.archive_validate,
@@ -467,7 +469,7 @@ def main() -> int:
         else:
             rendered = json.dumps(result, ensure_ascii=False, indent=2)
         if args.archive_report_output:
-            out_path = Path(args.archive_report_output)
+            out_path = resolve_project_path(args.archive_report_output, base_dir=project_root())
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(rendered, encoding="utf-8")
             print(json.dumps({"written": str(out_path), "format": args.archive_format}, ensure_ascii=False, indent=2))
@@ -477,8 +479,8 @@ def main() -> int:
 
     if args.correlate_archive:
         capture_path = Path(args.correlate_archive)
-        index_path = Path(args.correlate_archive_index or args.archive_index_db)
-        cache_path = Path(args.correlate_archive_cache)
+        index_path = resolve_project_path(args.correlate_archive_index or args.archive_index_db, base_dir=project_root())
+        cache_path = resolve_project_path(args.correlate_archive_cache, base_dir=project_root())
         if not capture_path.exists():
             print(f"Capture file not found: {capture_path}")
             return 1

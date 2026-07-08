@@ -26,6 +26,7 @@ from .archive_index import (
 )
 from .correlator import correlate_capture_to_files, render_correlation_csv, render_correlation_markdown
 from .dmm import render_dmm_patch_draft
+from .paths import project_logs_dir, project_root, resolve_project_path
 
 try:
     from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
@@ -2290,7 +2291,7 @@ class MainWindow(QMainWindow):
         controls = QGroupBox("Archive Index")
         controls_layout = QGridLayout(controls)
         self.archive_root_edit = QLineEdit(r"C:\Program Files (x86)\Steam\steamapps\common\Crimson Desert")
-        self.archive_index_db_edit = QLineEdit(str(Path("logs") / "cdsniffer-archive-index.sqlite"))
+        self.archive_index_db_edit = QLineEdit(str(project_logs_dir() / "cdsniffer-archive-index.sqlite"))
         self.archive_paz_dir_edit = QLineEdit()
         self.archive_paz_dir_edit.setPlaceholderText("Optional PAZ directory for standalone .pamt")
         self.archive_patterns_edit = QPlainTextEdit("*.paseq\n*.json\n*.xml")
@@ -2350,10 +2351,10 @@ class MainWindow(QMainWindow):
 
         correlate_box = QGroupBox("Correlate Capture Against Archive Index")
         correlate_layout = QGridLayout(correlate_box)
-        self.archive_capture_edit = QLineEdit(str(Path("logs") / "camp-mission.jsonl"))
+        self.archive_capture_edit = QLineEdit(str(project_logs_dir() / "camp-mission.jsonl"))
         self.archive_baseline_capture_edit = QLineEdit()
         self.archive_baseline_capture_edit.setPlaceholderText("Optional before-state capture for target-only diff")
-        self.archive_cache_dir_edit = QLineEdit(str(Path("logs") / "archive-cache"))
+        self.archive_cache_dir_edit = QLineEdit(str(project_logs_dir() / "archive-cache"))
         self.archive_correlation_root_edit = QLineEdit()
         self.archive_correlation_root_edit.setPlaceholderText("Optional decoded/unpacked folder for folder correlation")
         self.archive_correlation_globs_edit = QLineEdit("*.paseq, *.json, *.xml")
@@ -2628,7 +2629,7 @@ class MainWindow(QMainWindow):
             db_text = self.archive_index_db_edit.text().strip()
             if not db_text:
                 raise ValueError("Index DB is required.")
-            db_path = Path(db_text)
+            db_path = resolve_project_path(db_text, base_dir=project_root())
             paz_dir_text = self.archive_paz_dir_edit.text().strip()
             if paz_dir_text:
                 require_path(paz_dir_text, "PAZ directory", kind="dir")
@@ -2649,7 +2650,7 @@ class MainWindow(QMainWindow):
 
     def run_archive_index_search(self) -> None:
         try:
-            db_path = require_path(self.archive_index_db_edit.text(), "Archive index DB", kind="file")
+            db_path = require_path(resolve_project_path(self.archive_index_db_edit.text(), base_dir=project_root()), "Archive index DB", kind="file")
         except (ValueError, FileNotFoundError) as exc:
             QMessageBox.warning(self, "Archive Preflight Failed", str(exc))
             return
@@ -2665,9 +2666,13 @@ class MainWindow(QMainWindow):
 
     def run_archive_correlation(self) -> None:
         try:
-            capture_path = require_path(self.archive_capture_edit.text(), "Capture file", kind="file")
-            db_path = require_path(self.archive_index_db_edit.text(), "Archive index DB", kind="file")
-            cache_dir = Path(self.archive_cache_dir_edit.text().strip())
+            capture_path = require_path(
+                resolve_project_path(self.archive_capture_edit.text(), base_dir=project_root()),
+                "Capture file",
+                kind="file",
+            )
+            db_path = require_path(resolve_project_path(self.archive_index_db_edit.text(), base_dir=project_root()), "Archive index DB", kind="file")
+            cache_dir = resolve_project_path(self.archive_cache_dir_edit.text(), base_dir=project_root())
             if not str(cache_dir).strip():
                 raise ValueError("Cache dir is required.")
             if cache_dir.exists() and not cache_dir.is_dir():
@@ -2675,7 +2680,11 @@ class MainWindow(QMainWindow):
             if not cache_dir.exists():
                 cache_dir.mkdir(parents=True, exist_ok=True)
             if self.archive_baseline_capture_edit.text().strip():
-                require_path(self.archive_baseline_capture_edit.text(), "Baseline capture file", kind="file")
+                require_path(
+                    resolve_project_path(self.archive_baseline_capture_edit.text(), base_dir=project_root()),
+                    "Baseline capture file",
+                    kind="file",
+                )
         except (ValueError, FileNotFoundError, OSError) as exc:
             QMessageBox.warning(self, "Archive Preflight Failed", str(exc))
             return

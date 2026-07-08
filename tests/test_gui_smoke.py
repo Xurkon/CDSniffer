@@ -21,6 +21,7 @@ try:
 
     from cd_sniffer.cli import parse_args
     from cd_sniffer.core import collect_matching_windows
+    from cd_sniffer.paths import project_root
     from cd_sniffer.gui import HotkeyLineEdit, MainWindow, SettingsDialog, require_path
 except Exception as exc:  # pragma: no cover - depends on optional GUI extra
     QApplication = None  # type: ignore[assignment]
@@ -222,6 +223,31 @@ class GuiSmokeTests(unittest.TestCase):
         finally:
             window.close()
             app.processEvents()
+
+    def test_archive_index_build_resolves_relative_db_path_into_repo(self):
+        app = QApplication.instance() or QApplication([])
+        window = MainWindow()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            window.archive_root_edit.setText(str(root))
+            window.archive_index_db_edit.setText("logs/cdsniffer-archive-index.sqlite")
+            captured: dict[str, object] = {}
+
+            def fake_start_archive_task(task: str, params: dict[str, object]) -> None:
+                captured["task"] = task
+                captured["params"] = dict(params)
+
+            try:
+                with patch.object(window, "start_archive_task", side_effect=fake_start_archive_task):
+                    window.run_archive_index_build()
+                self.assertEqual(captured["task"], "build-index")
+                params = captured["params"]
+                expected_db = project_root() / "logs" / "cdsniffer-archive-index.sqlite"
+                self.assertEqual(Path(params["db_path"]), expected_db)
+                self.assertTrue(Path(params["db_path"]).is_absolute())
+            finally:
+                window.close()
+                app.processEvents()
 
     def test_capture_summary_updates_when_hotkey_changes(self):
         app = QApplication.instance() or QApplication([])
